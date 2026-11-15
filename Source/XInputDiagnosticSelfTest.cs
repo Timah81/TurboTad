@@ -27,6 +27,11 @@ namespace TurboTad
             s.Pad.LeftX = -32768; s.Pad.LeftY = 32767;
             s.Pad.RightX = -16384; s.Pad.RightY = 16384;
             Check(XInputProbe.AxisValue(s,0) == -1 && XInputProbe.AxisValue(s,1) == 1, "stick endpoints");
+            Check(Math.Abs(XInputProbe.AxisValue(s,4) - 64.0/255.0) < .00001, "LT proportional");
+            Check(XInputProbe.AxisValue(s,5) == 1, "RT full pull");
+            Check(XInputProbe.AxisName(4) == "LT" && XInputProbe.AxisName(5) == "RT", "trigger axis names");
+            s.Pad.LeftTrigger = 0; s.Pad.RightTrigger = 0;
+            Check(XInputProbe.AxisValue(s,4) == 0 && XInputProbe.AxisValue(s,5) == 0, "released triggers are neutral");
             Check(Math.Abs(XInputProbe.AxisValue(s,2) + .5) < .0001, "negative stick proportional");
             Check(Math.Abs(XInputProbe.AxisValue(s,3) - .5) < .0001, "positive stick proportional");
             Check(XInputProbe.ButtonDown(s,10) && XInputProbe.ButtonDown(s,8), "Xbox button bits");
