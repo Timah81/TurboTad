@@ -47,9 +47,18 @@ namespace TurboTad
             if (!File.Exists(path)) return result;
             try
             {
+                // A discovery inventory may be edited or corrupted independently
+                // of saved flight mappings. Refuse DTDs and oversized XML.
+                XmlReaderSettings settings = new XmlReaderSettings {
+                    DtdProcessing = DtdProcessing.Prohibit,
+                    XmlResolver = null,
+                    MaxCharactersInDocument = 65536,
+                    MaxCharactersFromEntities = 1024
+                };
                 XmlDocument doc = new XmlDocument();
                 doc.XmlResolver = null;
-                doc.Load(path);
+                using (XmlReader reader = XmlReader.Create(path, settings))
+                    doc.Load(reader);
                 XmlElement catalog = doc.DocumentElement;
                 if (catalog == null || catalog.Name != "DeviceDiscovery" ||
                     catalog.GetAttribute("version") != "1") throw new FormatException("Unsupported discovery file version");
@@ -79,14 +88,16 @@ namespace TurboTad
             doc.AppendChild(catalog);
             foreach (InputSource source in sources)
                 catalog.AppendChild(InputMapper.WriteSource(doc, "Source", source));
-            string path = FilePath(root), temp = path + ".tmp";
+            string path = FilePath(root);
+            string temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             Directory.CreateDirectory(root);
             try
             {
                 doc.Save(temp);
-                // A sidecar inventory is optional and contains no mappings.
-                // Keep the original file until the new XML has been written.
-                File.Copy(temp, path, true);
+                // Replace the completed file atomically. A failed write must
+                // not leave a half-written inventory for the next launch.
+                if (File.Exists(path)) File.Replace(temp, path, null);
+                else File.Move(temp, path);
             }
             finally { try { if (File.Exists(temp)) File.Delete(temp); } catch {} }
         }
