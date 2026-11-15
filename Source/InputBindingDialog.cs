@@ -129,10 +129,12 @@ namespace TurboTad
             Populate(negativeChoice, negative, devices);
             Populate(positiveChoice, positive, devices);
             negativeChoice.SelectedIndexChanged += delegate {
-                negative = ((Choice)negativeChoice.SelectedItem).Source;
+                Choice selected = negativeChoice.SelectedItem as Choice;
+                negative = selected == null ? null : selected.Source;
             };
             positiveChoice.SelectedIndexChanged += delegate {
-                positive = ((Choice)positiveChoice.SelectedItem).Source;
+                Choice selected = positiveChoice.SelectedItem as Choice;
+                positive = selected == null ? null : selected.Source;
             };
 
             negativeLearn.Text = "LEARN";
