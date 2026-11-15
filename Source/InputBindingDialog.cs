@@ -105,6 +105,10 @@ namespace TurboTad
 
         internal DirectionPairDialog(string axisName, string negativeName, string positiveName,
             AxisBinding current, IList<Device> devices)
+            : this(axisName, negativeName, positiveName, current, devices, null) {}
+
+        internal DirectionPairDialog(string axisName, string negativeName, string positiveName,
+            AxisBinding current, IList<Device> devices, InputDiscoveryCatalog discovered)
         {
             Text = "TurboTad — " + axisName; ClientSize = new Size(710, 272);
             StartPosition = FormStartPosition.CenterParent; FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -126,8 +130,8 @@ namespace TurboTad
             Configure(negativeChoice, 200, 72);
             Configure(positiveChoice, 200, 127);
             Controls.Add(negativeChoice); Controls.Add(positiveChoice);
-            Populate(negativeChoice, negative, devices);
-            Populate(positiveChoice, positive, devices);
+            Populate(negativeChoice, negative, devices, discovered);
+            Populate(positiveChoice, positive, devices, discovered);
             negativeChoice.SelectedIndexChanged += delegate {
                 Choice selected = negativeChoice.SelectedItem as Choice;
                 negative = selected == null ? null : selected.Source;
@@ -180,7 +184,8 @@ namespace TurboTad
             combo.DropDownHeight = 330;
         }
 
-        private static void Populate(ComboBox combo, InputSource selected, IList<Device> devices)
+        private static void Populate(ComboBox combo, InputSource selected, IList<Device> devices,
+            InputDiscoveryCatalog discovered)
         {
             combo.Items.Add(new Choice(null));
             // List all XInput slots regardless of current connection so binding
@@ -191,6 +196,23 @@ namespace TurboTad
             foreach (Device d in devices)
                 for (int b = 0; b < Math.Min(32, (int)d.Caps.Buttons); b++)
                     combo.Items.Add(new Choice(InputSource.Joystick(d.Identity, b, false)));
+
+            // The physically exercised controls come first on both direction
+            // pickers, while the complete supported fallback list remains.
+            int insertAt = 1;
+            if (discovered != null)
+                foreach (InputSource source in discovered.OfType(false))
+                {
+                    Choice match = null;
+                    foreach (Choice candidate in combo.Items)
+                        if (candidate.Source != null && candidate.Source.Identity == source.Identity)
+                        { match = candidate; break; }
+                    if (match == null && (source.Kind == "key" || source.Kind == "xbutton"))
+                        match = new Choice(source);
+                    if (match == null) continue;
+                    combo.Items.Remove(match);
+                    combo.Items.Insert(insertAt++, match);
+                }
             Select(combo, selected); // Preserve saved keyboard and unplugged-device sources.
         }
 
