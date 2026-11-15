@@ -36,7 +36,7 @@ namespace TurboTad
         private void EditDirectionPair(int row)
         {
             StopControls(); learning=-1;
-            using(DirectionPairDialog dialog=new DirectionPairDialog(labels[row],negativeNames[row],positiveNames[row],directionPairs[row],devices))
+            using(DirectionPairDialog dialog=new DirectionPairDialog(labels[row],negativeNames[row],positiveNames[row],directionPairs[row],devices,discovered))
                 if(dialog.ShowDialog(this)==DialogResult.OK)
                 { directionPairs[row]=dialog.Binding;RefreshInputRow(row); }
         }
