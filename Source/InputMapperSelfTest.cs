@@ -97,7 +97,8 @@ internal static class InputMapperSelfTest
             Check(xboxButton.Valid(false) && !xboxButton.Valid(true), "Xbox button source is digital only");
             Check(!InputSource.XboxAxis(4, 0).Valid(true), "invalid Xbox slot rejected");
             Check(InputSource.XboxAxis(0, 4).Valid(true) && InputSource.XboxAxis(0, 5).Valid(true), "LT RT are analog");
-            Check(!InputSource.XboxAxis(0, 6).Valid(true), "invalid Xbox axis rejected");
+            Check(InputSource.XboxAxis(0, 6).Valid(true), "optional paired triggers are an analog axis");
+            Check(!InputSource.XboxAxis(0, 7).Valid(true), "invalid Xbox axis rejected");
             Check(!InputSource.XboxButton(0, 14).Valid(false), "invalid Xbox button rejected");
             Check(!new InputSource{Kind="xaxis",Device="xinput:0:forged",Code=0}.Valid(true), "forged Xbox identity rejected");
             Check(InputMapper.ReadSource(InputMapper.WriteSource(doc,"Analog",xboxAxis),true).Identity==xboxAxis.Identity,
@@ -111,6 +112,30 @@ internal static class InputMapperSelfTest
             frame.Axes[rightTrigger.Identity] = .25;
             Value(new AxisBinding { Analog = rightTrigger, Invert = true }, frame, -(.25-.04)/.96, "RT invert negative-only");
             Check(InputMapper.ReadSource(InputMapper.WriteSource(doc, "Analog", leftTrigger), true).Identity == leftTrigger.Identity, "LT persistence");
+            InputSource pairedTriggers = InputSource.XboxAxis(0, 6);
+            frame.Axes[pairedTriggers.Identity] = .65;
+            AxisBinding pairedBinding = new AxisBinding { Analog = pairedTriggers };
+            Value(pairedBinding, frame, (.65-.04)/.96, "paired RT positive proportional");
+            frame.Axes[pairedTriggers.Identity] = -.35;
+            Value(pairedBinding, frame, -(.35-.04)/.96, "paired LT negative proportional");
+            pairedBinding.Invert = true;
+            Value(pairedBinding, frame, (.35-.04)/.96, "paired trigger inversion");
+            frame.Axes[pairedTriggers.Identity] = 0;
+            Value(pairedBinding, frame, 0, "paired triggers neutral");
+            Check(InputMapper.ReadSource(InputMapper.WriteSource(doc, "Analog", pairedTriggers), true).Identity == pairedTriggers.Identity,
+                "paired trigger profile roundtrip");
+            Check(InputMapper.ValidateSources(new AxisBinding[]{new AxisBinding{Analog=leftTrigger},
+                new AxisBinding{Analog=rightTrigger}}, null, out error),
+                "LT and RT can be assigned independently to different flight axes");
+            Check(!InputMapper.ValidateSources(new AxisBinding[]{new AxisBinding{Analog=pairedTriggers},
+                new AxisBinding{Analog=leftTrigger}}, null, out error),
+                "paired axis reserves LT from simultaneous reassignment");
+            Check(!InputMapper.ValidateSources(new AxisBinding[]{new AxisBinding{Analog=rightTrigger},
+                new AxisBinding{Analog=pairedTriggers}}, null, out error),
+                "paired axis reserves RT regardless of assignment order");
+            Check(InputMapper.ValidateSources(new AxisBinding[]{new AxisBinding{Analog=pairedTriggers},
+                new AxisBinding{Analog=InputSource.XboxAxis(1, 4)}}, null, out error),
+                "other Xbox controller triggers remain independent");
             frame.Axes[xboxAxis.Identity] = .75;
             Value(new AxisBinding{Analog=xboxAxis},frame,(.75-.04)/.96,"Xbox axis stays proportional");
             frame.Buttons[xboxButton.Identity]=true;
