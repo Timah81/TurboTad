@@ -264,6 +264,7 @@ namespace TurboTad
                 }
             }
             else boostSoundIssue = "TurboTadBoost.wav is missing from the mod's Assets folder.";
+            discovered = InputDiscoveryCatalog.Load(root);
             BuildBetaflightInterface();
             Scan();
             LoadMapping();
@@ -420,6 +421,8 @@ namespace TurboTad
             SyncMphFromPercent();
 
             UiLabel(input, "INPUT ASSIGNMENTS", 20, 10, 330, 29, 12F, Orange, true);
+            Button discoverControls = ThemeButton(input, "DISCOVER CONTROLS", 799, 9, 242, 34, false);
+            discoverControls.Click += delegate { BeginDeviceDiscovery(); };
             UiLabel(input, "Choose Analog or Buttons for each axis. Learn an axis, or assign its two directions.", 20, 38, 1020, 26, 9.5F, Muted);
             UiLabel(input, "AXIS", 24, 71, 190, 24, 9F, Muted, true);
             UiLabel(input, "TYPE / INPUT SOURCE", 227, 71, 448, 24, 9F, Muted, true);
@@ -753,6 +756,7 @@ namespace TurboTad
                         boostChoice.Items.Add(new ButtonChoice { Xbox = InputSource.XboxButton(player, b) });
                 }
             boostChoice.SelectedIndex = 0;
+            PromoteDiscoveredOptions();
             prompt.Text = devices.Count + " joystick(s), " + controllers +
                 " Xbox controller(s) detected. Xbox sticks and triggers can be assigned.";
         }
