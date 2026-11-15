@@ -73,18 +73,30 @@ internal static class InputMapperSelfTest
             XmlElement stored = InputMapper.WriteAxis(doc, 2, pair); doc.DocumentElement.AppendChild(stored);
             AxisBinding restored = InputMapper.ReadAxis(stored);
             Check(restored.Digital && restored.Negative.Identity == left.Identity && restored.Positive.Identity == right.Identity, "digital binding XML roundtrip");
+            Check(InputMapper.PreferLearnCandidate(true, .65, false, .95), "XInput wins mirrored WinMM axis");
+            Check(!InputMapper.PreferLearnCandidate(false, 1.0, true, .65), "WinMM cannot override XInput");
+            Check(InputMapper.PreferLearnCandidate(false, .85, false, .60), "WinMM-only strongest motion still learns");
+            Check(!InputMapper.PreferLearnCandidate(true, .25, false, .80), "below-threshold XInput motion ignored");
             InputSource xboxAxis = InputSource.XboxAxis(0, 1);
             InputSource xboxButton = InputSource.XboxButton(0, 10); // A
             Check(xboxAxis.Valid(true) && !xboxAxis.Valid(false), "Xbox stick source is analog only");
             Check(xboxButton.Valid(false) && !xboxButton.Valid(true), "Xbox button source is digital only");
             Check(!InputSource.XboxAxis(4, 0).Valid(true), "invalid Xbox slot rejected");
-            Check(!InputSource.XboxAxis(0, 4).Valid(true), "invalid Xbox axis rejected");
+            Check(InputSource.XboxAxis(0, 4).Valid(true) && InputSource.XboxAxis(0, 5).Valid(true), "LT RT are analog");
+            Check(!InputSource.XboxAxis(0, 6).Valid(true), "invalid Xbox axis rejected");
             Check(!InputSource.XboxButton(0, 14).Valid(false), "invalid Xbox button rejected");
             Check(!new InputSource{Kind="xaxis",Device="xinput:0:forged",Code=0}.Valid(true), "forged Xbox identity rejected");
             Check(InputMapper.ReadSource(InputMapper.WriteSource(doc,"Analog",xboxAxis),true).Identity==xboxAxis.Identity,
                 "Xbox axis XML roundtrip");
             Check(InputMapper.ReadSource(InputMapper.WriteSource(doc,"Positive",xboxButton),false).Identity==xboxButton.Identity,
                 "Xbox button XML roundtrip");
+            InputSource leftTrigger = InputSource.XboxAxis(0, 4);
+            InputSource rightTrigger = InputSource.XboxAxis(0, 5);
+            frame.Axes[leftTrigger.Identity] = .65;
+            Value(new AxisBinding { Analog = leftTrigger }, frame, (.65-.04)/.96, "LT proportional");
+            frame.Axes[rightTrigger.Identity] = .25;
+            Value(new AxisBinding { Analog = rightTrigger, Invert = true }, frame, -(.25-.04)/.96, "RT invert negative-only");
+            Check(InputMapper.ReadSource(InputMapper.WriteSource(doc, "Analog", leftTrigger), true).Identity == leftTrigger.Identity, "LT persistence");
             frame.Axes[xboxAxis.Identity] = .75;
             Value(new AxisBinding{Analog=xboxAxis},frame,(.75-.04)/.96,"Xbox axis stays proportional");
             frame.Buttons[xboxButton.Identity]=true;
