@@ -176,7 +176,11 @@ internal static class InputMapperUiSelfTest
                     int count = 0;
                     foreach (object candidate in choices[row].Items)
                         if (candidate.ToString().StartsWith("Xbox 1 / ", StringComparison.Ordinal)) count++;
-                    if (count != 6) throw new Exception("Saved offline Xbox axes missing in row " + row);
+                    if (count != 7) throw new Exception("Saved offline Xbox axes missing in row " + row);
+                    bool pairedFound = false;
+                    foreach (object candidate in choices[row].Items)
+                        if (candidate.ToString() == "Xbox 1 / LT + RT (paired axis)") pairedFound = true;
+                    if (!pairedFound) throw new Exception("Optional paired trigger choice missing in row " + row);
                 }
                 // Regression: the Xbox can wake after the initial joystick/device scan.
                 // Simulate that change without requiring a physical controller in CI.
@@ -202,17 +206,52 @@ internal static class InputMapperUiSelfTest
                     int count = 0;
                     foreach (object candidate in choices[row].Items)
                         if (candidate.ToString().StartsWith("Xbox 3 / ", StringComparison.Ordinal)) count++;
-                    if (count != 6) throw new Exception("Hotplug Xbox axes missing in row " + row);
+                    if (count != 7) throw new Exception("Hotplug Xbox axes missing in row " + row);
                 }
                 Call(t,f,"EnsureXboxLearnCandidates",learnRow);
                 AssertSameXboxAxisOptions(choices);
-                for(int axis=0;axis<6;axis++)
+                for(int axis=0;axis<7;axis++)
                 {
                     string identity="xaxis:xinput:"+player+":"+axis;
                     if(!baseline.Contains(identity) || (double)baseline[identity]!=0)
                         throw new Exception("Late Xbox axis missing its neutral Learn baseline: "+identity);
                 }
                 if (!invert[learnRow].Checked)throw new Exception("Xbox discovery changed manual inversion");
+                f.Close();
+            }
+            // Opt-in paired mode survives a profile load and save while unplugged.
+            // Individual LT and RT must remain selectable in the same dropdowns.
+            XmlDocument pairedConfig = new XmlDocument(); pairedConfig.Load(mapping);
+            ((XmlElement)pairedConfig.SelectSingleNode("/TurboTad/UniversalInput/Binding[@row='0']/Analog"))
+                .SetAttribute("code", "6");
+            pairedConfig.Save(mapping);
+            using(Form f=(Form)Activator.CreateInstance(t,new object[]{root}))
+            {
+                if(t.GetField("mappingLoadError",Flags).GetValue(f)!=null)
+                    throw new Exception("Paired trigger profile was rejected on load");
+                ComboBox[] choices=(ComboBox[])t.GetField("choices",Flags).GetValue(f);
+                AssertSameXboxAxisOptions(choices);
+                if (choices[0].SelectedItem.ToString()!="Xbox 1 / LT + RT (paired axis)")
+                    throw new Exception("Saved paired trigger assignment not restored");
+                for (int row=0; row<choices.Length; row++)
+                {
+                    bool lt=false, rt=false, pairOption=false;
+                    foreach(object item in choices[row].Items)
+                    {
+                        string label=item.ToString();
+                        if(label=="Xbox 1 / LT")lt=true;
+                        if(label=="Xbox 1 / RT")rt=true;
+                        if(label=="Xbox 1 / LT + RT (paired axis)")pairOption=true;
+                    }
+                    if(!lt||!rt||!pairOption)
+                        throw new Exception("Separate and paired options missing in row "+row);
+                }
+                Call(t,f,"SaveMapping");
+                XmlDocument roundtrip=new XmlDocument();roundtrip.Load(mapping);
+                XmlElement analogNode=(XmlElement)roundtrip.SelectSingleNode("/TurboTad/UniversalInput/Binding[@row='0']/Analog");
+                if(analogNode==null||analogNode.GetAttribute("code")!="6"||
+                    analogNode.GetAttribute("kind")!="xaxis")
+                    throw new Exception("Paired trigger selection did not survive save");
                 f.Close();
             }
             string invalid = "<TurboTad><UniversalInput version='99'/></TurboTad>";
