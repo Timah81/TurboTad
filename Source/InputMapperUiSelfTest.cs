@@ -286,6 +286,30 @@ internal static class InputMapperUiSelfTest
             catalog=loadCatalog.Invoke(null,new object[]{scanRoot});
             if((int)catalogType.GetProperty("Count",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(catalog,null)!=2)
                 throw new Exception("Discovered source inventory did not roundtrip");
+            // Exercise replacement of an existing inventory, not only the first save.
+            saveCatalog.Invoke(catalog,new object[]{scanRoot});
+            string inventoryPath=Path.Combine(scanRoot,"device-discovery.xml");
+            if(Directory.GetFiles(scanRoot,"device-discovery.xml.*.tmp").Length!=0)
+                throw new Exception("Discovery save left a temporary file");
+            object roundtripCatalog=loadCatalog.Invoke(null,new object[]{scanRoot});
+            if((int)catalogType.GetProperty("Count",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(roundtripCatalog,null)!=2)
+                throw new Exception("Replacing an existing discovery inventory lost sources");
+            // Invalid sidecar XML must never create flight bindings or block startup.
+            // A DTD with local entities must be rejected even when no external URL exists.
+            File.WriteAllText(inventoryPath,
+                "<!DOCTYPE DeviceDiscovery [<!ENTITY injected 'xinput:2'>]>" +
+                "<DeviceDiscovery version='1'><Source kind='xaxis' device='&injected;' code='4'/></DeviceDiscovery>");
+            object invalidInventory=loadCatalog.Invoke(null,new object[]{scanRoot});
+            if((int)catalogType.GetProperty("Count",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(invalidInventory,null)!=0 ||
+                catalogType.GetField("LoadIssue",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(invalidInventory)==null)
+                throw new Exception("Discovery loader accepted DTD or kept partial inventory");
+            File.WriteAllText(inventoryPath,"<DeviceDiscovery version='1'>" + new string(' ',70000) + "</DeviceDiscovery>");
+            invalidInventory=loadCatalog.Invoke(null,new object[]{scanRoot});
+            if((int)catalogType.GetProperty("Count",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(invalidInventory,null)!=0 ||
+                catalogType.GetField("LoadIssue",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(invalidInventory)==null)
+                throw new Exception("Oversized discovery inventory was accepted");
+            // Restore the valid inventory for subsequent GUI tests.
+            saveCatalog.Invoke(catalog,new object[]{scanRoot});
             using(Form wizard=(Form)Activator.CreateInstance(discoveryType,
                 BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic,
                 null,new object[]{emptyDevices,catalog},null))
