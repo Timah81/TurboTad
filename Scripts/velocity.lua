@@ -24,7 +24,7 @@ end
 local function commanded_direction(pawn,axes,settings)
     local forward=vec(pawn:GetActorForwardVector())
     if not forward then return nil,'Could not read Tadpole forward vector' end
-    if type(axes)~='table' then return unit(forward),'no translation command' end
+    if type(axes)~='table' then return nil,'no translation command' end
     settings=settings or {}
     local forwardScale=settings.ForwardScale or 1
     local strafeScale=settings.StrafeScale or 1
@@ -47,7 +47,7 @@ local function commanded_direction(pawn,axes,settings)
         Z=f.Z*x*forwardScale+right.Z*y*strafeScale+up.Z*z*verticalScale,
     }
     local normalized=unit(direction)
-    if not normalized then return unit(f),'zero translation command' end
+    if not normalized then return nil,'zero translation command' end
     return normalized
 end
 local function valid(o)
@@ -70,7 +70,14 @@ function M.new(scripts,config)
         local before=vec(cm.Velocity)
         if not before then return false,'Could not read movement velocity' end
         local direction,reason=commanded_direction(pawn,axes,settings)
-        if not direction then return false,reason or 'Tadpole direction invalid' end
+        if not direction then
+            -- Consume the normal cooldown and keep successful boost signaling,
+            -- but never change velocity if translation input is neutral.
+            if reason=='zero translation command' or reason=='no translation command' then
+                return true
+            end
+            return false,reason or 'Tadpole direction invalid'
+        end
         local projectedSpeed=dot(before,direction)
         local increment=math.max(0,targetSpeed-projectedSpeed)
         local target={X=before.X+direction.X*increment,
