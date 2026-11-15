@@ -101,6 +101,15 @@ namespace TurboTad
             return travel > incumbentTravel;
         }
 
+        // Button LEARN sees duplicate WinMM and XInput events from one Xbox
+        // controller. Prefer the XInput identity when it arrives during capture.
+        // Leave legacy/keyboard as fallback for other devices and unsupported keys.
+        internal static bool PreferButtonLearnCandidate(InputSource candidate, InputSource incumbent)
+        {
+            return candidate != null &&
+                (incumbent == null || (candidate.Kind == "xbutton" && incumbent.Kind != "xbutton"));
+        }
+
         internal static bool AreDigitalSourcesReleased(AxisBinding[] axes, IInputFrame frame)
         {
             foreach (AxisBinding axis in axes)
