@@ -56,6 +56,12 @@ namespace TurboTad
         }
         private void SelectAnalogSource(int row,InputSource source,bool inverted)
         {
+            // A saved Xbox binding may load while the pad is asleep. Catalog
+            // all six analog axes for that player in every flight dropdown.
+            int xboxPlayer;
+            if(source!=null && source.Kind=="xaxis" &&
+                InputSource.TryXboxPlayer(source.Device,out xboxPlayer))
+                EnsureXboxAxisChoices(xboxPlayer);
             choices[row].SelectedIndex=0;
             if(source!=null)
             {
