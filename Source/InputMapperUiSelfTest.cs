@@ -261,7 +261,68 @@ internal static class InputMapperUiSelfTest
                 Call(t,f,"SaveMapping"); f.Close();
                 if(File.ReadAllText(mapping)!=invalid)throw new Exception("Unsupported mapping was overwritten");
             }
-            Console.WriteLine("Mapper GUI tests passed: manual Xbox bumper pair, legacy/offline migration, backup, keyboard-only Start, digital persistence, neutral T6D7 Stop.");return 0;
+            // Discovery is a separate, validated inventory: it must not mutate
+            // mapping.xml, force assignments, or require connected gamepads.
+            Type catalogType = a.GetType("TurboTad.InputDiscoveryCatalog", true);
+            Type sourceType = a.GetType("TurboTad.InputSource", true);
+            Type discoveryType = a.GetType("TurboTad.DeviceDiscoveryDialog", true);
+            string scanRoot = Path.Combine(root, "DeviceDiscoveryTest");
+            Directory.CreateDirectory(scanRoot);
+            object catalog = Activator.CreateInstance(catalogType, true);
+            MethodInfo addSource = catalogType.GetMethod("Add",BindingFlags.Instance|BindingFlags.NonPublic);
+            MethodInfo saveCatalog = catalogType.GetMethod("Save",BindingFlags.Instance|BindingFlags.NonPublic);
+            MethodInfo loadCatalog = catalogType.GetMethod("Load",BindingFlags.Static|BindingFlags.NonPublic);
+            MethodInfo xboxAnalogSource = sourceType.GetMethod("XboxAxis",BindingFlags.Static|BindingFlags.NonPublic);
+            MethodInfo xboxButtonSource = sourceType.GetMethod("XboxButton",BindingFlags.Static|BindingFlags.NonPublic);
+            object discoveredLt = xboxAnalogSource.Invoke(null,new object[]{2,4});
+            object discoveredRb = xboxButtonSource.Invoke(null,new object[]{1,9});
+            if(!(bool)addSource.Invoke(catalog,new object[]{discoveredLt}) ||
+               !(bool)addSource.Invoke(catalog,new object[]{discoveredRb}) ||
+               (bool)addSource.Invoke(catalog,new object[]{discoveredLt}))
+                throw new Exception("Discovery did not deduplicate stable source identities");
+            saveCatalog.Invoke(catalog,new object[]{scanRoot});
+            if(File.Exists(Path.Combine(scanRoot,"mapping.xml")))
+                throw new Exception("Discovery overwrote flight bindings");
+            catalog=loadCatalog.Invoke(null,new object[]{scanRoot});
+            if((int)catalogType.GetProperty("Count",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(catalog,null)!=2)
+                throw new Exception("Discovered source inventory did not roundtrip");
+            using(Form wizard=(Form)Activator.CreateInstance(discoveryType,
+                BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic,
+                null,new object[]{emptyDevices,catalog},null))
+            {
+                bool startFound=false,doneFound=false;
+                foreach(Control child in wizard.Controls)
+                    if(child is Button)
+                    {
+                        if(child.Text=="START SCAN")startFound=true;
+                        if(child.Text=="USE RESULTS")doneFound=true;
+                    }
+                if(!startFound||!doneFound)throw new Exception("Discovery scan controls missing");
+            }
+            using(Form f=(Form)Activator.CreateInstance(t,new object[]{scanRoot}))
+            {
+                ComboBox[] discoveredChoices=(ComboBox[])t.GetField("choices",Flags).GetValue(f);
+                AssertSameXboxAxisOptions(discoveredChoices);
+                for(int row=0;row<6;row++)
+                    if(discoveredChoices[row].Items.Count<2 ||
+                       discoveredChoices[row].Items[1].ToString()!="Xbox 3 / LT")
+                        throw new Exception("Discovered Xbox axis not prioritized in row "+row);
+                ComboBox discoveredBoost=(ComboBox)t.GetField("boostChoice",Flags).GetValue(f);
+                if(discoveredBoost.Items.Count<2 || discoveredBoost.Items[1].ToString()!="Xbox 2 / RB")
+                    throw new Exception("Discovered Xbox button not prioritized in Boost");
+                using(Form pair=(Form)Activator.CreateInstance(pairType,
+                    BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic,
+                    null,new object[]{"Thrust up / down","Down","Up",emptyPair,emptyDevices,catalog},null))
+                {
+                    ComboBox neg=(ComboBox)pairType.GetField("negativeChoice",Flags).GetValue(pair);
+                    ComboBox pos=(ComboBox)pairType.GetField("positiveChoice",Flags).GetValue(pair);
+                    if(neg.Items[1].ToString()!="Xbox 2 / RB" ||
+                       pos.Items[1].ToString()!="Xbox 2 / RB")
+                        throw new Exception("Discovered buttons not prioritized in both pair pickers");
+                }
+                f.Close();
+            }
+            Console.WriteLine("Mapper GUI tests passed: manual Xbox bumper pair, legacy/offline migration, backup, keyboard-only Start, digital persistence, neutral T6D7 Stop, device discovery menu priority and persistence.");return 0;
         }
         catch(Exception e) {Console.Error.WriteLine(e);return 1;}
     }
