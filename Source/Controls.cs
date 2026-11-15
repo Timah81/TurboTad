@@ -447,6 +447,9 @@ namespace TurboTad
             Button loadProfile = ThemeButton(input, "LOAD PROFILE", 606, 483, 157, 35, false);
             loadProfile.Click += delegate { ImportInputProfile(); };
             UiLabel(input, "Profiles store input bindings only.", 435, 525, 545, 24, 9F, Muted);
+            // Deliberately read-only: XInput detection must not change mappings or game controls.
+            Button testXboxInput = ThemeButton(input, "TEST XBOX INPUT", 782, 483, 255, 35, false);
+            testXboxInput.Click += delegate { using (XInputDiagnosticDialog dialog = new XInputDiagnosticDialog()) dialog.ShowDialog(this); };
 
             UiLabel(boostPage, "BOOST & SOUND", 20, 10, 420, 30, 12F, Orange, true);
             Panel boostCard = Section(boostPage, 20, 70, 671, 281, "DIRECTIONAL BOOST", "");
