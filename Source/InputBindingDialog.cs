@@ -11,6 +11,10 @@ namespace TurboTad
         {
             if (source == null) return "Unassigned";
             if (source.Kind == "key") return "Key " + ((Keys)source.Code).ToString();
+            int player;
+            if (InputSource.TryXboxPlayer(source.Device, out player))
+                return "Xbox " + (player + 1) + " / " + (source.Kind == "xaxis" ?
+                    XInputProbe.AxisName(source.Code) : XInputProbe.ButtonName(source.Code));
             string[] parts = source.Device.Split(new char[]{':'},4);
             string name = parts.Length == 4 ? "#" + (UInt32.Parse(parts[0])+1) + " " + parts[3] : source.Device;
             return name + (source.Kind == "axis" ? " / Axis " : " / Button ") + (source.Code+1);
@@ -25,11 +29,11 @@ namespace TurboTad
         internal InputSource Selected;
         internal InputCaptureDialog(IList<Device> available)
         {
-            devices = available; Text = "Assign a key or joystick button";
+            devices = available; Text = "Assign a key, joystick button or Xbox button";
             ClientSize = new Size(540,150); StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false;
             Font = new Font("Segoe UI",10F);
-            Label help = new Label { Text = "Press the keyboard key or joystick button to assign.\r\nRelease held controls first. Escape cancels.", AutoSize = false };
+            Label help = new Label { Text = "Press a keyboard key, joystick or Xbox button.\r\nRelease held controls first. Escape cancels.", AutoSize = false };
             help.SetBounds(20,20,500,65); Controls.Add(help);
             Button cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel };
             cancel.SetBounds(400,105,115,30);Controls.Add(cancel);CancelButton=cancel;
@@ -59,6 +63,16 @@ namespace TurboTad
                 for(int b=0;b<Math.Min(32,(int)d.Caps.Buttons);b++)
                 {
                     Observe(InputSource.Joystick(d.Identity,b,false),(d.Buttons&(1U<<b))!=0,capture);
+                    if(Selected!=null)return;
+                }
+            }
+            for(int player=0;player<4;player++)
+            {
+                XInputProbe.State state;string issue;
+                if(!XInputProbe.TryRead((uint)player,out state,out issue))continue;
+                for(int b=0;b<XInputProbe.ButtonBits.Length;b++)
+                {
+                    Observe(InputSource.XboxButton(player,b),XInputProbe.ButtonDown(state,b),capture);
                     if(Selected!=null)return;
                 }
             }

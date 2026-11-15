@@ -80,6 +80,33 @@ internal static class InputMapperUiSelfTest
                 if(!(bool)t.GetField("running",Flags).GetValue(f))throw new Exception("Corrected saved conflict still blocks Start");
                 Call(t,f,"StopControls"); f.Close();
             }
+            XmlDocument xbox = new XmlDocument(); xbox.LoadXml(config.OuterXml);
+            XmlElement xboxRow = (XmlElement)xbox.SelectSingleNode("/TurboTad/UniversalInput/Binding[@row='0']");
+            xboxRow.SetAttribute("mode", "analog"); xboxRow.SetAttribute("invert", "1");
+            while(xboxRow.HasChildNodes) xboxRow.RemoveChild(xboxRow.FirstChild);
+            XmlElement xboxAnalog = xbox.CreateElement("Analog");
+            xboxAnalog.SetAttribute("kind", "xaxis"); xboxAnalog.SetAttribute("device", "xinput:0"); xboxAnalog.SetAttribute("code", "0");
+            xboxRow.AppendChild(xboxAnalog);
+            XmlElement xboxBoost = xbox.CreateElement("Boost");
+            xboxBoost.SetAttribute("kind", "xbutton"); xboxBoost.SetAttribute("device", "xinput:0"); xboxBoost.SetAttribute("code", "10");
+            xbox.DocumentElement["UniversalInput"].AppendChild(xboxBoost);
+            xbox.Save(mapping);
+            using(Form f=(Form)Activator.CreateInstance(t,new object[]{root}))
+            {
+                if(t.GetField("mappingLoadError",Flags).GetValue(f)!=null) throw new Exception("Xbox profile failed to load while controller unplugged");
+                Call(t,f,"StartControls");
+                if((bool)t.GetField("running",Flags).GetValue(f)) throw new Exception("Xbox binding was allowed to drive native game controls");
+                Call(t,f,"SaveMapping");
+                config.Load(mapping);
+                XmlElement savedXbox=(XmlElement)config.SelectSingleNode("/TurboTad/UniversalInput/Binding[@row='0']/Analog");
+                if(savedXbox==null || savedXbox.GetAttribute("kind")!="xaxis" || savedXbox.GetAttribute("device")!="xinput:0")
+                    throw new Exception("Xbox axis did not survive SaveMapping");
+                if(((XmlElement)config.SelectSingleNode("/TurboTad/UniversalInput/Binding[@row='0']")).GetAttribute("invert")!="1")
+                    throw new Exception("Xbox axis manual inversion was lost");
+                XmlElement savedBoost=(XmlElement)config.SelectSingleNode("/TurboTad/UniversalInput/Boost");
+                if(savedBoost==null || savedBoost.GetAttribute("kind")!="xbutton")throw new Exception("Xbox boost binding did not roundtrip");
+                f.Close();
+            }
             string invalid = "<TurboTad><UniversalInput version='99'/></TurboTad>";
             File.WriteAllText(mapping,invalid);
             using(Form f = (Form)Activator.CreateInstance(t,new object[]{root}))

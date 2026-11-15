@@ -18,7 +18,9 @@ namespace TurboTad
                 else
                 {
                     AxisChoice a=choices[i].SelectedItem as AxisChoice;
-                    result[i]=new AxisBinding { Analog=a==null||a.Device==null?null:InputSource.Joystick(a.Device.Identity,a.Axis,true), Invert=invert[i].Checked };
+                    InputSource source = a == null ? null : a.Xbox != null ? a.Xbox :
+                        a.Device == null ? null : InputSource.Joystick(a.Device.Identity,a.Axis,true);
+                    result[i]=new AxisBinding { Analog=source, Invert=invert[i].Checked };
                 }
             }
             return result;
@@ -59,8 +61,15 @@ namespace TurboTad
             {
                 AxisChoice found=null;
                 foreach(AxisChoice candidate in choices[row].Items)
-                    if(candidate.Device!=null && candidate.Device.Identity==source.Device && candidate.Axis==source.Code){found=candidate;break;}
-                if(found==null){found=new AxisChoice{Device=OfflineDevice(source.Device),Axis=source.Code};choices[row].Items.Add(found);}
+                    if(source.Kind=="xaxis" ? candidate.Xbox!=null && candidate.Xbox.Identity==source.Identity :
+                        candidate.Device!=null && candidate.Device.Identity==source.Device && candidate.Axis==source.Code)
+                    {found=candidate;break;}
+                if(found==null)
+                {
+                    found=source.Kind=="xaxis"?new AxisChoice{Xbox=source}:
+                        new AxisChoice{Device=OfflineDevice(source.Device),Axis=source.Code};
+                    choices[row].Items.Add(found);
+                }
                 choices[row].SelectedItem=found;
             }
             invert[row].Checked=inverted;
@@ -71,6 +80,7 @@ namespace TurboTad
             foreach(ButtonChoice b in boostChoice.Items)
                 if(b.Source!=null && b.Source.Identity==source.Identity){boostChoice.SelectedItem=b;return;}
             ButtonChoice next=source.Kind=="key"?new ButtonChoice{Key=source.Code}:
+                source.Kind=="xbutton"?new ButtonChoice{Xbox=source}:
                 new ButtonChoice{Device=OfflineDevice(source.Device),Button=source.Code};
             boostChoice.Items.Add(next);boostChoice.SelectedItem=next;
         }
@@ -80,7 +90,15 @@ namespace TurboTad
             internal HelperInputFrame(ControlsWindow window){owner=window;}
             public bool TryAxis(InputSource source,out double value)
             {
-                value=0;Device d=owner.FindDevice(source.Device);
+                value=0;
+                if(source.Kind=="xaxis")
+                {
+                    XInputProbe.State state;
+                    if(!owner.TryXboxState(source.Device,out state))return false;
+                    value=XInputProbe.AxisValue(state,source.Code);
+                    return true;
+                }
+                Device d=owner.FindDevice(source.Device);
                 if(d==null||!d.Connected||!d.Supports(source.Code))return false;
                 value=d.Values[source.Code];return true;
             }
@@ -88,6 +106,12 @@ namespace TurboTad
             {
                 down=false;
                 if(source.Kind=="key") down=(Native.GetAsyncKeyState(source.Code)&0x8000)!=0;
+                else if(source.Kind=="xbutton")
+                {
+                    XInputProbe.State state;
+                    if(!owner.TryXboxState(source.Device,out state))return false;
+                    down=XInputProbe.ButtonDown(state,source.Code);
+                }
                 else
                 {
                     Device d=owner.FindDevice(source.Device);if(d==null||!d.Connected || source.Code>=Math.Min(d.Caps.Buttons,32U))return false;
@@ -126,11 +150,11 @@ namespace TurboTad
                     throw new FormatException("Invalid or duplicate axis row");
                 parsed[row]=InputMapper.ReadAxis(item);
                 foreach(InputSource source in parsed[row].Sources)
-                    if(source.Kind!="key")OfflineDevice(source.Device); // Validate before touching UI.
+                    if(source.Kind=="axis"||source.Kind=="button")OfflineDevice(source.Device); // Validate before touching UI.
             }
             for(int i=0;i<6;i++)if(parsed[i]==null)throw new FormatException("Input profile must contain all six axes");
             InputSource boost=InputMapper.ReadSource(element["Boost"],false);
-            if(boost!=null&&boost.Kind!="key")OfflineDevice(boost.Device);
+            if(boost!=null&&(boost.Kind=="axis"||boost.Kind=="button"))OfflineDevice(boost.Device);
             string conflict;
             bool valid = InputMapper.ValidateSources(parsed, boost, out conflict);
             if (!valid && !allowEditableConflicts) throw new FormatException(conflict);

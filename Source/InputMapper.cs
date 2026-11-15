@@ -13,11 +13,26 @@ namespace TurboTad
         internal static InputSource Key(int code) { return new InputSource { Kind = "key", Code = code, Device = "" }; }
         internal static InputSource Joystick(string device, int code, bool analog)
         { return new InputSource { Kind = analog ? "axis" : "button", Device = device, Code = code }; }
+        internal static InputSource XboxAxis(int player, int axis)
+        { return new InputSource { Kind = "xaxis", Device = "xinput:" + player.ToString(CultureInfo.InvariantCulture), Code = axis }; }
+        internal static InputSource XboxButton(int player, int button)
+        { return new InputSource { Kind = "xbutton", Device = "xinput:" + player.ToString(CultureInfo.InvariantCulture), Code = button }; }
+        internal static bool TryXboxPlayer(string device, out int player)
+        {
+            player = -1;
+            if (device == null || device.Length != 8 || !device.StartsWith("xinput:", StringComparison.Ordinal) ||
+                device[7] < '0' || device[7] > '3') return false;
+            player = device[7] - '0';
+            return true;
+        }
         internal bool Valid(bool analog)
         {
-            if (analog) return Kind == "axis" && !String.IsNullOrEmpty(Device) && Code >= 0 && Code < 6;
-            return Kind == "key" ? Code >= 8 && Code <= 254 :
-                Kind == "button" && !String.IsNullOrEmpty(Device) && Code >= 0 && Code < 32;
+            int slot;
+            if (analog) return (Kind == "axis" && !String.IsNullOrEmpty(Device) && Code >= 0 && Code < 6) ||
+                (Kind == "xaxis" && TryXboxPlayer(Device, out slot) && Code >= 0 && Code < 4);
+            if (Kind == "key") return Code >= 8 && Code <= 254;
+            if (Kind == "button") return !String.IsNullOrEmpty(Device) && Code >= 0 && Code < 32;
+            return Kind == "xbutton" && TryXboxPlayer(Device, out slot) && Code >= 0 && Code < 14;
         }
     }
 

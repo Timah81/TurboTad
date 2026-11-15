@@ -141,13 +141,15 @@ namespace TurboTad
     {
         internal Device Device;
         internal int Axis;
+        internal InputSource Xbox;
         private static readonly string[] Names = { "X", "Y", "Z", "R", "U", "V" };
         public override string ToString()
         {
+            if (Xbox != null) return InputNames.Describe(Xbox);
             return Device == null ? "Choose an axis, or click Learn" :
                 "#" + (Device.Id + 1) + " " + Device.Caps.Name + " / " + Names[Axis];
         }
-        internal string Identity { get { return Device.Id + ":" + Axis; } }
+        internal string Identity { get { return Xbox != null ? Xbox.Identity : Device.Id + ":" + Axis; } }
     }
 
     internal sealed class ButtonChoice
@@ -155,19 +157,35 @@ namespace TurboTad
         internal Device Device;
         internal int Button;
         internal int Key;
-        internal InputSource Source { get { return Key != 0 ? InputSource.Key(Key) : Device == null ? null : InputSource.Joystick(Device.Identity, Button, false); } }
+        internal InputSource Xbox;
+        internal InputSource Source { get { return Xbox != null ? Xbox : Key != 0 ? InputSource.Key(Key) : Device == null ? null : InputSource.Joystick(Device.Identity, Button, false); } }
         public override string ToString()
         {
-            return Key != 0 ? InputNames.Describe(Source) : Device == null ? "No boost button assigned" :
+            return Xbox != null || Key != 0 ? InputNames.Describe(Source) : Device == null ? "No boost button assigned" :
                 "#" + (Device.Id + 1) + " " + Device.Caps.Name + " / Button " + (Button + 1);
         }
-        internal bool Down { get { return Key != 0 ? (Native.GetAsyncKeyState(Key) & 0x8000) != 0 : Device != null && Device.Connected && (Device.Buttons & (1U << Button)) != 0; } }
+        internal bool Down
+        {
+            get
+            {
+                if (Xbox != null)
+                {
+                    int player; XInputProbe.State state; string issue;
+                    return InputSource.TryXboxPlayer(Xbox.Device, out player) &&
+                        XInputProbe.TryRead((uint)player, out state, out issue) && XInputProbe.ButtonDown(state, Xbox.Code);
+                }
+                return Key != 0 ? (Native.GetAsyncKeyState(Key) & 0x8000) != 0 :
+                    Device != null && Device.Connected && (Device.Buttons & (1U << Button)) != 0;
+            }
+        }
     }
 
     public sealed partial class ControlsWindow : Form
     {
         private readonly string root;
         private readonly List<Device> devices = new List<Device>();
+        private readonly XInputProbe.State[] xboxStates = new XInputProbe.State[4];
+        private readonly bool[] xboxConnected = new bool[4];
         private readonly ComboBox[] choices = new ComboBox[6];
         private readonly ComboBox[] inputModes = new ComboBox[6];
         private readonly Button[] pairButtons = new Button[6];
@@ -663,6 +681,35 @@ namespace TurboTad
             return label;
         }
 
+        private void PollXbox()
+        {
+            for (uint player = 0; player < 4; player++)
+            {
+                string issue;
+                XInputProbe.State state;
+                xboxConnected[(int)player] = XInputProbe.TryRead(player, out state, out issue);
+                xboxStates[(int)player] = state;
+            }
+        }
+
+        private bool TryXboxState(string device, out XInputProbe.State state)
+        {
+            state = new XInputProbe.State();
+            int player;
+            if (!InputSource.TryXboxPlayer(device, out player) || !xboxConnected[player]) return false;
+            state = xboxStates[player];
+            return true;
+        }
+
+        private bool HasXboxMapping()
+        {
+            foreach (AxisBinding binding in CurrentBindings())
+                foreach (InputSource source in binding.Sources)
+                    if (source.Kind == "xaxis" || source.Kind == "xbutton") return true;
+            ButtonChoice boost = boostChoice.SelectedItem as ButtonChoice;
+            return boost != null && boost.Source != null && boost.Source.Kind == "xbutton";
+        }
+
         private void Scan()
         {
             StopControls();
@@ -677,6 +724,7 @@ namespace TurboTad
                 Device d = new Device(); d.Id = id; d.Caps = caps;
                 if (d.Poll()) devices.Add(d);
             }
+            PollXbox();
             for (int i = 0; i < 6; i++)
             {
                 choices[i].Items.Clear();
@@ -684,6 +732,10 @@ namespace TurboTad
                 foreach (Device d in devices)
                     for (int axis = 0; axis < 6; axis++)
                         if (d.Supports(axis)) choices[i].Items.Add(new AxisChoice { Device = d, Axis = axis });
+                for (int player = 0; player < xboxConnected.Length; player++)
+                    if (xboxConnected[player])
+                        for (int axis = 0; axis < 4; axis++)
+                            choices[i].Items.Add(new AxisChoice { Xbox = InputSource.XboxAxis(player, axis) });
                 choices[i].SelectedIndex = 0;
             }
             boostChoice.Items.Clear();
@@ -691,9 +743,17 @@ namespace TurboTad
             foreach (Device d in devices)
                 for (int b = 0; b < Math.Min((int)d.Caps.Buttons, 32); b++)
                     boostChoice.Items.Add(new ButtonChoice { Device = d, Button = b });
+            int controllers = 0;
+            for (int player = 0; player < xboxConnected.Length; player++)
+                if (xboxConnected[player])
+                {
+                    controllers++;
+                    for (int b = 0; b < XInputProbe.ButtonBits.Length; b++)
+                        boostChoice.Items.Add(new ButtonChoice { Xbox = InputSource.XboxButton(player, b) });
+                }
             boostChoice.SelectedIndex = 0;
-            prompt.Text = devices.Count == 0 ? "No joystick detected. Use keyboard buttons, or connect a device and rescan." :
-                devices.Count + " joystick device(s) found. Assign all six axes with Analog or Buttons.";
+            prompt.Text = devices.Count + " joystick(s), " + controllers +
+                " Xbox controller(s) detected. Xbox bindings are preview-only for now.";
         }
 
         private void BeginLearn(int row)
@@ -702,12 +762,18 @@ namespace TurboTad
             
             if (inputModes[row].SelectedIndex == 1) { EditDirectionPair(row); return; }
             baseline.Clear();
-            foreach (Device d in devices)
+            PollXbox();
+            foreach (Device d in devices) d.Poll();
+            foreach (AxisChoice choice in choices[row].Items)
             {
-                d.Poll();
-                if (!d.Connected) continue;
-                for (int a = 0; a < 6; a++)
-                    if (d.Supports(a)) baseline[d.Id + ":" + a] = d.Values[a];
+                if (choice.Xbox != null)
+                {
+                    XInputProbe.State state;
+                    if (TryXboxState(choice.Xbox.Device, out state))
+                        baseline[choice.Identity] = XInputProbe.AxisValue(state, choice.Xbox.Code);
+                }
+                else if (choice.Device != null && choice.Device.Connected && choice.Device.Supports(choice.Axis))
+                    baseline[choice.Identity] = choice.Device.Values[choice.Axis];
             }
             learning = row;
             prompt.Text = instructions[row];
@@ -744,6 +810,13 @@ namespace TurboTad
 
         private void StartControls()
         {
+            // Xbox flight input would currently compete with the game's native controller mapping.
+            // Permit mapping/preview/save tests, but never publish Xbox-driven flight until isolation is tested.
+            if (HasXboxMapping())
+            {
+                prompt.Text = "Xbox bindings are preview-only until native game control conflicts are resolved.";
+                return;
+            }
             double[] values;
             if (!TryGetAxes(out values))
             {
@@ -772,16 +845,28 @@ namespace TurboTad
         private void TickControls()
         {
             foreach (Device d in devices) d.Poll();
+            PollXbox();
             if (learning >= 0)
             {
                 AxisChoice winner = null;
                 double best = 0.55;
                 foreach (AxisChoice a in choices[learning].Items)
                 {
-                    if (a.Device == null || !a.Device.Connected) continue;
+                    double current;
+                    if (a.Xbox != null)
+                    {
+                        XInputProbe.State state;
+                        if (!TryXboxState(a.Xbox.Device, out state)) continue;
+                        current = XInputProbe.AxisValue(state, a.Xbox.Code);
+                    }
+                    else
+                    {
+                        if (a.Device == null || !a.Device.Connected) continue;
+                        current = a.Device.Values[a.Axis];
+                    }
                     double center;
                     if (!baseline.TryGetValue(a.Identity, out center)) continue;
-                    double travel = Math.Abs(a.Device.Values[a.Axis] - center);
+                    double travel = Math.Abs(current - center);
                     if (travel > best) { best = travel; winner = a; }
                 }
                 if (winner != null)
@@ -798,9 +883,14 @@ namespace TurboTad
             double[] values;
             bool mapped = TryGetAxes(out values);
             filterDigital = false;
+            // Per-row preview permits Xbox Learn testing before all six axes are assigned.
+            AxisBinding[] preview = CurrentBindings();
+            HelperInputFrame previewFrame = new HelperInputFrame(this);
             for (int i = 0; i < 6; i++)
             {
-                meters[i].Text = mapped ? values[i].ToString("+0.00;-0.00;0.00", CultureInfo.InvariantCulture) : "--";
+                double value; string error;
+                bool valid = InputMapper.TryEvaluate(preview[i], previewFrame, (double)deadzone.Value, out value, out error);
+                meters[i].Text = valid ? value.ToString("+0.00;-0.00;0.00", CultureInfo.InvariantCulture) : "--";
             }
             if (running && !mapped)
             {

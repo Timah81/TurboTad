@@ -58,7 +58,7 @@ namespace TurboTad
             return false;
         }
 
-        private static readonly ushort[] ButtonBits = {
+        internal static readonly ushort[] ButtonBits = {
             0x0001, 0x0002, 0x0004, 0x0008, 0x0010, 0x0020,
             0x0040, 0x0080, 0x0100, 0x0200,
             0x1000, 0x2000, 0x4000, 0x8000
@@ -67,6 +67,29 @@ namespace TurboTad
             "D-Up", "D-Down", "D-Left", "D-Right", "Start", "Back",
             "L3", "R3", "LB", "RB", "A", "B", "X", "Y"
         };
+
+        internal static string AxisName(int axis)
+        {
+            string[] names = { "LX", "LY", "RX", "RY" };
+            return axis >= 0 && axis < names.Length ? names[axis] : "?";
+        }
+        internal static string ButtonName(int button)
+        { return button >= 0 && button < ButtonNames.Length ? ButtonNames[button] : "?"; }
+        internal static double AxisValue(State state, int axis)
+        {
+            short v;
+            switch (axis)
+            {
+                case 0: v = state.Pad.LeftX; break;
+                case 1: v = state.Pad.LeftY; break;
+                case 2: v = state.Pad.RightX; break;
+                case 3: v = state.Pad.RightY; break;
+                default: throw new ArgumentOutOfRangeException("axis");
+            }
+            return v < 0 ? v / 32768.0 : v / 32767.0;
+        }
+        internal static bool ButtonDown(State state, int button)
+        { return button >= 0 && button < ButtonBits.Length && (state.Pad.Buttons & ButtonBits[button]) != 0; }
 
         internal static string DescribeButtons(ushort buttons)
         {
