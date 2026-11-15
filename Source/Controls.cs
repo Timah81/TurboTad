@@ -687,15 +687,21 @@ namespace TurboTad
             return label;
         }
 
-        private void PollXbox()
+        // Report only newly connected controllers so hotplug updates run once,
+        // rather than rebuilding the dropdown contents on every 16ms UI tick.
+        private bool PollXbox()
         {
+            bool newlyConnected = false;
             for (uint player = 0; player < 4; player++)
             {
                 string issue;
                 XInputProbe.State state;
+                bool wasConnected = xboxConnected[(int)player];
                 xboxConnected[(int)player] = XInputProbe.TryRead(player, out state, out issue);
+                if (xboxConnected[(int)player] && !wasConnected) newlyConnected = true;
                 xboxStates[(int)player] = state;
             }
+            return newlyConnected;
         }
 
         private bool TryXboxState(string device, out XInputProbe.State state)
@@ -729,12 +735,10 @@ namespace TurboTad
                 foreach (Device d in devices)
                     for (int axis = 0; axis < 6; axis++)
                         if (d.Supports(axis)) choices[i].Items.Add(new AxisChoice { Device = d, Axis = axis });
-                for (int player = 0; player < xboxConnected.Length; player++)
-                    if (xboxConnected[player])
-                        for (int axis = 0; axis < XInputProbe.AxisCount; axis++)
-                            choices[i].Items.Add(new AxisChoice { Xbox = InputSource.XboxAxis(player, axis) });
                 choices[i].SelectedIndex = 0;
             }
+            // All six flight dropdowns must expose the same Xbox axes.
+            EnsureXboxAxisChoices(-1);
             boostChoice.Items.Clear();
             boostChoice.Items.Add(new ButtonChoice());
             foreach (Device d in devices)
@@ -753,28 +757,53 @@ namespace TurboTad
                 " Xbox controller(s) detected. Xbox sticks and triggers can be assigned.";
         }
 
-        // XInput can become connected after the window's initial Scan() (for example,
-        // when a wireless controller wakes up). The diagnostic already polls live,
-        // but Learn must also discover those axes without requiring a manual Rescan.
-        private void EnsureXboxLearnCandidates(int row)
+        // Unify Xbox analog choices across all flight rows, including a controller
+        // referenced by a saved profile while unplugged. Never clear a selection:
+        // disconnected bindings stay editable and are restored on reconnect.
+        private void EnsureXboxAxisChoices(int includePlayer)
         {
-            for (int player = 0; player < xboxConnected.Length; player++)
+            bool[] known = (bool[])xboxConnected.Clone();
+            if (includePlayer >= 0 && includePlayer < known.Length) known[includePlayer] = true;
+            foreach (ComboBox combo in choices)
             {
-                if (!xboxConnected[player]) continue;
+                foreach (AxisChoice existing in combo.Items)
+                {
+                    int player;
+                    if (existing.Xbox != null &&
+                        InputSource.TryXboxPlayer(existing.Xbox.Device, out player))
+                        known[player] = true;
+                }
+            }
+            for (int player = 0; player < known.Length; player++)
+            {
+                if (!known[player]) continue;
                 for (int axis = 0; axis < XInputProbe.AxisCount; axis++)
                 {
                     InputSource source = InputSource.XboxAxis(player, axis);
-                    bool present = false;
-                    foreach (AxisChoice existing in choices[row].Items)
-                        if (existing.Xbox != null && existing.Xbox.Identity == source.Identity)
-                        { present = true; break; }
-                    if (present) continue;
-                    AxisChoice candidate = new AxisChoice { Xbox = source };
-                    choices[row].Items.Add(candidate);
-                    // A late-waking stick is centered at zero; capture its first
-                    // real movement rather than baselining the already-moved value.
-                    if (!baseline.ContainsKey(candidate.Identity)) baseline[candidate.Identity] = 0;
+                    foreach (ComboBox combo in choices)
+                    {
+                        bool present = false;
+                        foreach (AxisChoice existing in combo.Items)
+                            if (existing.Xbox != null && existing.Xbox.Identity == source.Identity)
+                            { present = true; break; }
+                        if (!present) combo.Items.Add(new AxisChoice { Xbox = source });
+                    }
                 }
+            }
+        }
+
+        // Learn can start before a wireless Xbox wakes up. New Xbox axes share
+        // a neutral baseline; existing live axes are baselined in BeginLearn().
+        private void EnsureXboxLearnCandidates(int row)
+        {
+            EnsureXboxAxisChoices(-1);
+            foreach (AxisChoice candidate in choices[row].Items)
+            {
+                int player;
+                if (candidate.Xbox != null &&
+                    InputSource.TryXboxPlayer(candidate.Xbox.Device, out player) &&
+                    xboxConnected[player] && !baseline.ContainsKey(candidate.Identity))
+                    baseline[candidate.Identity] = 0;
             }
         }
 
@@ -863,11 +892,15 @@ namespace TurboTad
         private void TickControls()
         {
             foreach (Device d in devices) d.Poll();
-            PollXbox();
+            bool newXboxConnected = PollXbox();
+            if (newXboxConnected)
+            {
+                // Hotplug must update every axis dropdown, not just the active Learn row.
+                if (learning >= 0) EnsureXboxLearnCandidates(learning);
+                else EnsureXboxAxisChoices(-1);
+            }
             if (learning >= 0)
             {
-                // Include controllers that connected or woke while Learn was open.
-                EnsureXboxLearnCandidates(learning);
                 AxisChoice winner = null;
                 double best = 0.55;
                 foreach (AxisChoice a in choices[learning].Items)
