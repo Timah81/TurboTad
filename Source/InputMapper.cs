@@ -29,7 +29,7 @@ namespace TurboTad
         {
             int slot;
             if (analog) return (Kind == "axis" && !String.IsNullOrEmpty(Device) && Code >= 0 && Code < 6) ||
-                (Kind == "xaxis" && TryXboxPlayer(Device, out slot) && Code >= 0 && Code < 6);
+                (Kind == "xaxis" && TryXboxPlayer(Device, out slot) && Code >= 0 && Code < 7);
             if (Kind == "key") return Code >= 8 && Code <= 254;
             if (Kind == "button") return !String.IsNullOrEmpty(Device) && Code >= 0 && Code < 32;
             return Kind == "xbutton" && TryXboxPlayer(Device, out slot) && Code >= 0 && Code < 14;
@@ -122,6 +122,19 @@ namespace TurboTad
             return true;
         }
 
+        // A paired trigger axis owns both physical triggers. Reserving their
+        // identities prevents assigning either half to another flight axis.
+        // Standalone LT and RT can still be assigned to separate axes.
+        private static IEnumerable<string> OccupiedSources(InputSource source)
+        {
+            if (source.Kind == "xaxis" && source.Code == 6)
+            {
+                yield return "xaxis:" + source.Device + ":4";
+                yield return "xaxis:" + source.Device + ":5";
+            }
+            else yield return source.Identity;
+        }
+
         internal static bool ValidateSources(AxisBinding[] axes, InputSource boost, out string error)
         {
             string[] names = { "Forward / reverse", "Strafe right / left", "Thrust up / down", "Pitch up / down", "Yaw right / left", "Roll right / left" };
@@ -131,9 +144,12 @@ namespace TurboTad
                 {
                     string previous;
                     string action = row < names.Length ? names[row] : "Axis " + (row + 1);
-                    if (used.TryGetValue(source.Identity, out previous))
-                    { error = previous + " and " + action + " use the same control"; return false; }
-                    used.Add(source.Identity, action);
+                    foreach (string key in OccupiedSources(source))
+                    {
+                        if (used.TryGetValue(key, out previous))
+                        { error = previous + " and " + action + " use the same control"; return false; }
+                        used.Add(key, action);
+                    }
                 }
             if (boost != null)
             {
