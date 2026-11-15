@@ -1,0 +1,46 @@
+# Build products and Windows-generated files
+bin/
+obj/
+.vs/
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.cache
+*.tmp
+*.bak
+*.dmp
+*.zip
+
+# User settings and game-to-helper transient IPC
+mapping.xml
+audio-settings.xml
+input.txt
+boost-status.txt
+TurboTadBoost.wav
+*.wav
+*.log
+*.crash
+Crashes/
+Saved/
+Logs/
+
+# External dependencies and experimental runtime probes
+dwmapi.dll
+UE4SS.log
+boost-probe.log
+boost-velocity.log
+probe.lua
+ring.lua
+
+# Local/editor junk
+.DS_Store
+Thumbs.db
+__pycache__/
+*.pyc
+.idea/
+.vscode/
+
+# Never include personal game saves, captures or recordings
+*.mp4
+*.mov
