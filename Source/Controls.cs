@@ -203,8 +203,6 @@ namespace TurboTad
         private readonly Label prompt = new Label();
         private readonly Label status = new Label();
         private readonly Button start = new Button();
-        // This is deliberately session-only. Do not persist an experimental input takeover.
-        private readonly CheckBox xboxFlightTest = new CheckBox();
         private readonly NumericUpDown deadzone = new DeferredNumericUpDown();
         private readonly NumericUpDown[] rotationRates = new NumericUpDown[3];
         private readonly NumericUpDown[] movementRates = new NumericUpDown[3];
@@ -235,6 +233,12 @@ namespace TurboTad
             "Move the control you want for NOSE RIGHT, then release it.",
             "Move the control you want for ROLL RIGHT, then release it." };
         private int learning = -1;
+        // Windows can expose the same Xbox controller through both XInput and WinMM.
+        // Allow Learn to collect overlapping reports before committing a binding.
+        private AxisChoice pendingLearnCandidate;
+        private double pendingLearnTravel;
+        private DateTime pendingLearnSinceUtc;
+        private const int LearnSettleMilliseconds = 125;
         private bool running;
         private long sequence = DateTime.UtcNow.Ticks;
         private string lastIoError;
@@ -467,14 +471,6 @@ namespace TurboTad
             Button loadProfile = ThemeButton(input, "LOAD PROFILE", 606, 483, 157, 35, false);
             loadProfile.Click += delegate { ImportInputProfile(); };
             UiLabel(input, "Profiles store input bindings only.", 435, 525, 545, 24, 9F, Muted);
-            // Temporary safety gate: changing this setting immediately stops active controls.
-            // This flag must NOT be saved or restored from mapping.xml or a user profile.
-            xboxFlightTest.SetBounds(22, 526, 407, 29);
-            xboxFlightTest.Text = "ENABLE XBOX FLIGHT TEST (RESETS OFF)";
-            xboxFlightTest.ForeColor = Orange;
-            xboxFlightTest.BackColor = Color.Transparent;
-            xboxFlightTest.CheckedChanged += delegate { StopControls(); };
-            input.Controls.Add(xboxFlightTest);
             // Deliberately read-only: XInput detection must not change mappings or game controls.
             Button testXboxInput = ThemeButton(input, "TEST XBOX INPUT", 782, 483, 255, 35, false);
             testXboxInput.Click += delegate { using (XInputDiagnosticDialog dialog = new XInputDiagnosticDialog()) dialog.ShowDialog(this); };
@@ -711,15 +707,6 @@ namespace TurboTad
             return true;
         }
 
-        private bool HasXboxMapping()
-        {
-            foreach (AxisBinding binding in CurrentBindings())
-                foreach (InputSource source in binding.Sources)
-                    if (source.Kind == "xaxis" || source.Kind == "xbutton") return true;
-            ButtonChoice boost = boostChoice.SelectedItem as ButtonChoice;
-            return boost != null && boost.Source != null && boost.Source.Kind == "xbutton";
-        }
-
         private void Scan()
         {
             StopControls();
@@ -744,7 +731,7 @@ namespace TurboTad
                         if (d.Supports(axis)) choices[i].Items.Add(new AxisChoice { Device = d, Axis = axis });
                 for (int player = 0; player < xboxConnected.Length; player++)
                     if (xboxConnected[player])
-                        for (int axis = 0; axis < 4; axis++)
+                        for (int axis = 0; axis < XInputProbe.AxisCount; axis++)
                             choices[i].Items.Add(new AxisChoice { Xbox = InputSource.XboxAxis(player, axis) });
                 choices[i].SelectedIndex = 0;
             }
@@ -763,7 +750,7 @@ namespace TurboTad
                 }
             boostChoice.SelectedIndex = 0;
             prompt.Text = devices.Count + " joystick(s), " + controllers +
-                " Xbox controller(s) detected. Xbox bindings are preview-only for now.";
+                " Xbox controller(s) detected. Xbox sticks and triggers can be assigned.";
         }
 
         // XInput can become connected after the window's initial Scan() (for example,
@@ -774,7 +761,7 @@ namespace TurboTad
             for (int player = 0; player < xboxConnected.Length; player++)
             {
                 if (!xboxConnected[player]) continue;
-                for (int axis = 0; axis < 4; axis++)
+                for (int axis = 0; axis < XInputProbe.AxisCount; axis++)
                 {
                     InputSource source = InputSource.XboxAxis(player, axis);
                     bool present = false;
@@ -797,6 +784,8 @@ namespace TurboTad
             
             if (inputModes[row].SelectedIndex == 1) { EditDirectionPair(row); return; }
             baseline.Clear();
+            pendingLearnCandidate = null;
+            pendingLearnTravel = 0;
             PollXbox();
             EnsureXboxLearnCandidates(row);
             foreach (Device d in devices) d.Poll();
@@ -846,14 +835,6 @@ namespace TurboTad
 
         private void StartControls()
         {
-            // The in-game controller already suppresses stock Tadpole look/rotation and
-            // consumes pending stock movement. Test whether that covers Xbox input too.
-            // Opt-in is temporary and explicitly reset on every helper launch.
-            if (HasXboxMapping() && !xboxFlightTest.Checked)
-            {
-                prompt.Text = "Xbox bindings are preview-only. Enable XBOX FLIGHT TEST to try in-game.";
-                return;
-            }
             double[] values;
             if (!TryGetAxes(out values))
             {
@@ -906,13 +887,30 @@ namespace TurboTad
                     double center;
                     if (!baseline.TryGetValue(a.Identity, out center)) continue;
                     double travel = Math.Abs(current - center);
-                    if (travel > best) { best = travel; winner = a; }
+                    if (InputMapper.PreferLearnCandidate(a.Xbox != null, travel,
+                            winner != null && winner.Xbox != null, best))
+                    { best = travel; winner = a; }
                 }
                 if (winner != null)
                 {
+                    if (pendingLearnCandidate == null) pendingLearnSinceUtc = DateTime.UtcNow;
+                    if (InputMapper.PreferLearnCandidate(winner.Xbox != null, best,
+                            pendingLearnCandidate != null && pendingLearnCandidate.Xbox != null, pendingLearnTravel))
+                    {
+                        pendingLearnCandidate = winner;
+                        pendingLearnTravel = best;
+                    }
+                }
+                // Keep a quick flick, but give XInput time to win over the
+                // legacy WinMM report for the same physical stick.
+                if (pendingLearnCandidate != null &&
+                    (DateTime.UtcNow - pendingLearnSinceUtc).TotalMilliseconds >= LearnSettleMilliseconds)
+                {
                     int row = learning;
                     learning = -1;
-                    choices[row].SelectedItem = winner;
+                    choices[row].SelectedItem = pendingLearnCandidate;
+                    pendingLearnCandidate = null;
+                    pendingLearnTravel = 0;
                     // Learning identifies an axis only. Inversion is explicitly user-controlled.
                     prompt.Text = labels[row] + " assigned. Release the control, then Learn the next row.";
                 }
