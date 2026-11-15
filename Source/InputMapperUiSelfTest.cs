@@ -16,6 +16,36 @@ internal static class InputMapperUiSelfTest
             string legacy = "<TurboTad deadzone='0.04' topSpeed='175'><Axis row='0' id='3' mid='231' pid='12' name='Offline VKB' axis='2' invert='1'/><BoostButton id='3' mid='231' pid='12' name='Offline VKB' button='4'/></TurboTad>";
             File.WriteAllText(mapping, legacy);
             Assembly a = Assembly.LoadFrom(args[0]); Type t = a.GetType("TurboTad.ControlsWindow", true);
+            // Every digital direction must have a manual Xbox button picker,
+            // even when no Xbox is currently connected or awake.
+            Type pairType = a.GetType("TurboTad.DirectionPairDialog", true);
+            Type axisType = a.GetType("TurboTad.AxisBinding", true);
+            Type deviceType = a.GetType("TurboTad.Device", true);
+            object emptyPair = Activator.CreateInstance(axisType, true);
+            object emptyDevices = Activator.CreateInstance(
+                typeof(System.Collections.Generic.List<>).MakeGenericType(deviceType));
+            using (Form pair = (Form)Activator.CreateInstance(pairType,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                null, new object[]{ "Thrust up / down", "Down", "Up", emptyPair, emptyDevices }, null))
+            {
+                ComboBox negativeOptions = (ComboBox)pairType.GetField("negativeChoice", Flags).GetValue(pair);
+                ComboBox positiveOptions = (ComboBox)pairType.GetField("positiveChoice", Flags).GetValue(pair);
+                int lb = -1, rb = -1;
+                for (int i = 0; i < negativeOptions.Items.Count; i++)
+                {
+                    if (negativeOptions.Items[i].ToString() == "Xbox 1 / LB") lb = i;
+                    if (positiveOptions.Items[i].ToString() == "Xbox 1 / RB") rb = i;
+                }
+                if (lb < 0 || rb < 0) throw new Exception("Manual digital pair has no Xbox bumper selections");
+                negativeOptions.SelectedIndex = lb; positiveOptions.SelectedIndex = rb;
+                object selectedNegative = pairType.GetField("negative", Flags).GetValue(pair);
+                object selectedPositive = pairType.GetField("positive", Flags).GetValue(pair);
+                if ((string)selectedNegative.GetType().GetField("Device", Flags).GetValue(selectedNegative) != "xinput:0" ||
+                    (int)selectedNegative.GetType().GetField("Code", Flags).GetValue(selectedNegative) != 8 ||
+                    (string)selectedPositive.GetType().GetField("Device", Flags).GetValue(selectedPositive) != "xinput:0" ||
+                    (int)selectedPositive.GetType().GetField("Code", Flags).GetValue(selectedPositive) != 9)
+                    throw new Exception("Manual Xbox bumpers were not selected as XInput sources");
+            }
             using (Form f = (Form)Activator.CreateInstance(t, new object[]{ root }))
             {
                 Call(t, f, "SaveMapping");
@@ -99,10 +129,15 @@ internal static class InputMapperUiSelfTest
             {
                 if(t.GetField("mappingLoadError",Flags).GetValue(f)!=null) throw new Exception("Xbox profile failed to load while controller unplugged");
                 if(t.GetField("xboxFlightTest",Flags)!=null) throw new Exception("Obsolete Xbox opt-in checkbox remains");
-                // No special opt-in: an unavailable Xbox still fails the usual
-                // mapping validation, without activating any flight output.
+                // No special opt-in. On an actual Windows gaming PC, Xbox 1
+                // may be connected during this automated test. Only demand
+                // disconnected rejection when it really is disconnected.
+                bool[] availableXbox = (bool[])t.GetField("xboxConnected",Flags).GetValue(f);
+                bool xboxOnePresent = availableXbox[0];
                 Call(t,f,"StartControls");
-                if((bool)t.GetField("running",Flags).GetValue(f)) throw new Exception("Disconnected Xbox mapping started");
+                bool startedXbox = (bool)t.GetField("running",Flags).GetValue(f);
+                if(!xboxOnePresent && startedXbox) throw new Exception("Disconnected Xbox mapping started");
+                if(startedXbox) Call(t,f,"StopControls");
                 Call(t,f,"SaveMapping");
                 config.Load(mapping);
                 XmlElement savedXbox=(XmlElement)config.SelectSingleNode("/TurboTad/UniversalInput/Binding[@row='0']/Analog");
@@ -151,7 +186,7 @@ internal static class InputMapperUiSelfTest
                 Call(t,f,"SaveMapping"); f.Close();
                 if(File.ReadAllText(mapping)!=invalid)throw new Exception("Unsupported mapping was overwritten");
             }
-            Console.WriteLine("Mapper GUI tests passed: legacy/offline migration, backup, keyboard-only Start, digital persistence, neutral T6D7 Stop.");return 0;
+            Console.WriteLine("Mapper GUI tests passed: manual Xbox bumper pair, legacy/offline migration, backup, keyboard-only Start, digital persistence, neutral T6D7 Stop.");return 0;
         }
         catch(Exception e) {Console.Error.WriteLine(e);return 1;}
     }
