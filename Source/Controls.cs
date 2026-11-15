@@ -756,6 +756,31 @@ namespace TurboTad
                 " Xbox controller(s) detected. Xbox bindings are preview-only for now.";
         }
 
+        // XInput can become connected after the window's initial Scan() (for example,
+        // when a wireless controller wakes up). The diagnostic already polls live,
+        // but Learn must also discover those axes without requiring a manual Rescan.
+        private void EnsureXboxLearnCandidates(int row)
+        {
+            for (int player = 0; player < xboxConnected.Length; player++)
+            {
+                if (!xboxConnected[player]) continue;
+                for (int axis = 0; axis < 4; axis++)
+                {
+                    InputSource source = InputSource.XboxAxis(player, axis);
+                    bool present = false;
+                    foreach (AxisChoice existing in choices[row].Items)
+                        if (existing.Xbox != null && existing.Xbox.Identity == source.Identity)
+                        { present = true; break; }
+                    if (present) continue;
+                    AxisChoice candidate = new AxisChoice { Xbox = source };
+                    choices[row].Items.Add(candidate);
+                    // A late-waking stick is centered at zero; capture its first
+                    // real movement rather than baselining the already-moved value.
+                    if (!baseline.ContainsKey(candidate.Identity)) baseline[candidate.Identity] = 0;
+                }
+            }
+        }
+
         private void BeginLearn(int row)
         {
             StopControls();
@@ -763,6 +788,7 @@ namespace TurboTad
             if (inputModes[row].SelectedIndex == 1) { EditDirectionPair(row); return; }
             baseline.Clear();
             PollXbox();
+            EnsureXboxLearnCandidates(row);
             foreach (Device d in devices) d.Poll();
             foreach (AxisChoice choice in choices[row].Items)
             {
@@ -848,6 +874,8 @@ namespace TurboTad
             PollXbox();
             if (learning >= 0)
             {
+                // Include controllers that connected or woke while Learn was open.
+                EnsureXboxLearnCandidates(learning);
                 AxisChoice winner = null;
                 double best = 0.55;
                 foreach (AxisChoice a in choices[learning].Items)

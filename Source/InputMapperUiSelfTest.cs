@@ -109,6 +109,36 @@ internal static class InputMapperUiSelfTest
                     throw new Exception("Xbox axis manual inversion was lost");
                 XmlElement savedBoost=(XmlElement)config.SelectSingleNode("/TurboTad/UniversalInput/Boost");
                 if(savedBoost==null || savedBoost.GetAttribute("kind")!="xbutton")throw new Exception("Xbox boost binding did not roundtrip");
+                // Regression: the Xbox can wake after the initial joystick/device scan.
+                // Simulate that change without requiring a physical controller in CI.
+                ComboBox[] choices = (ComboBox[])t.GetField("choices",Flags).GetValue(f);
+                CheckBox[] invert = (CheckBox[])t.GetField("invert",Flags).GetValue(f);
+                bool[] xboxConnected = (bool[])t.GetField("xboxConnected",Flags).GetValue(f);
+                System.Collections.IDictionary baseline = (System.Collections.IDictionary)t.GetField("baseline",Flags).GetValue(f);
+                int learnRow = 2, player = 2;
+                for (int i = choices[learnRow].Items.Count - 1; i >= 0; i--)
+                {
+                    object candidate = choices[learnRow].Items[i];
+                    if (candidate.GetType().GetField("Xbox",BindingFlags.Instance|BindingFlags.NonPublic|BindingFlags.Public).GetValue(candidate)!=null)
+                        choices[learnRow].Items.RemoveAt(i);
+                }
+                int before = choices[learnRow].Items.Count;
+                Array.Clear(xboxConnected, 0, xboxConnected.Length);
+                xboxConnected[player] = true;
+                invert[learnRow].Checked = true;
+                Call(t,f,"EnsureXboxLearnCandidates",learnRow);
+                if (choices[learnRow].Items.Count != before + 4)
+                    throw new Exception("Learn failed to discover a late-connected Xbox controller");
+                Call(t,f,"EnsureXboxLearnCandidates",learnRow);
+                if (choices[learnRow].Items.Count != before + 4)
+                    throw new Exception("Repeated Xbox Learn discovery produced duplicate candidates");
+                for(int axis=0;axis<4;axis++)
+                {
+                    string identity="xaxis:xinput:"+player+":"+axis;
+                    if(!baseline.Contains(identity) || (double)baseline[identity]!=0)
+                        throw new Exception("Late Xbox axis missing its neutral Learn baseline: "+identity);
+                }
+                if (!invert[learnRow].Checked)throw new Exception("Xbox discovery changed manual inversion");
                 f.Close();
             }
             string invalid = "<TurboTad><UniversalInput version='99'/></TurboTad>";
