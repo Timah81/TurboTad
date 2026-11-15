@@ -68,10 +68,10 @@ namespace TurboTad
             "L3", "R3", "LB", "RB", "A", "B", "X", "Y"
         };
 
-        internal const int AxisCount = 6;
+        internal const int AxisCount = 7;
         internal static string AxisName(int axis)
         {
-            string[] names = { "LX", "LY", "RX", "RY", "LT", "RT" };
+            string[] names = { "LX", "LY", "RX", "RY", "LT", "RT", "LT + RT (paired axis)" };
             return axis >= 0 && axis < names.Length ? names[axis] : "?";
         }
         internal static string ButtonName(int button)
@@ -88,6 +88,9 @@ namespace TurboTad
                 // Triggers are separate unipolar (0..1) proportional inputs.
                 case 4: return state.Pad.LeftTrigger / 255.0;
                 case 5: return state.Pad.RightTrigger / 255.0;
+                // Optional signed analog axis: right trigger positive, left negative.
+                // Both equally pressed cancel. Standalone LT and RT remain available.
+                case 6: return (state.Pad.RightTrigger - state.Pad.LeftTrigger) / 255.0;
                 default: throw new ArgumentOutOfRangeException("axis");
             }
             return v < 0 ? v / 32768.0 : v / 32767.0;
