@@ -14,7 +14,7 @@ $exe = Join-Path $dest 'TurboTad.Controls.exe'
 $assets = Join-Path $sourceRoot 'Assets'
 $css = Join-Path $sourceRoot 'Source'
 $refs = @('/reference:System.dll','/reference:System.Core.dll','/reference:System.Windows.Forms.dll','/reference:System.Drawing.dll','/reference:System.Xml.dll')
-$ui = @( (Join-Path $css 'Controls.cs'), (Join-Path $css 'BoostAudioPicker.cs'), (Join-Path $css 'RateSlider.cs'), (Join-Path $css 'InputMapper.cs'), (Join-Path $css 'UimControls.cs'), (Join-Path $css 'InputBindingDialog.cs'), (Join-Path $css 'XInputDiagnostic.cs') )
+$ui = @( (Join-Path $css 'Controls.cs'), (Join-Path $css 'BoostAudioPicker.cs'), (Join-Path $css 'RateSlider.cs'), (Join-Path $css 'InputMapper.cs'), (Join-Path $css 'UimControls.cs'), (Join-Path $css 'InputBindingDialog.cs'), (Join-Path $css 'XInputDiagnostic.cs'), (Join-Path $css 'InputDiscoveryCatalog.cs'), (Join-Path $css 'DeviceDiscoveryDialog.cs'), (Join-Path $css 'DiscoveryControls.cs') )
 foreach ($f in $ui) { if (!(Test-Path -LiteralPath $f -PathType Leaf)) { throw ('Source missing: ' + $f) } }
 $icon = Join-Path $assets 'TurboTad.ico'
 $logo = Join-Path $assets 'TurboTadLogo.png'
