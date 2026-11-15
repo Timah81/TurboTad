@@ -94,12 +94,14 @@ namespace TurboTad
         {
             if (!detected.Add(source)) return;
             string label = InputNames.Describe(source);
-            if (source.Kind == "axis")
+            if (source.Kind == "axis" || source.Kind == "button")
             {
                 foreach (Device d in joysticks)
                     if (d.Identity == source.Device)
                     {
-                        label = new AxisChoice { Device = d, Axis = source.Code }.ToString();
+                        label = source.Kind == "axis"
+                            ? new AxisChoice { Device = d, Axis = source.Code }.ToString()
+                            : "#" + (d.Id + 1) + " " + d.Caps.Name + " / Button " + (source.Code + 1);
                         break;
                     }
             }
@@ -173,6 +175,17 @@ namespace TurboTad
 
         private void ObserveInputs()
         {
+            // XInput first: on mirrored devices show the Xbox identity before
+            // the legacy WinMM mirror in the observed-input list.
+            for (int player=0; player<4; player++)
+            {
+                XInputProbe.State state; string issue;
+                if (!XInputProbe.TryRead((uint)player,out state,out issue)) continue;
+                for (int axis=0; axis<6; axis++)
+                    TrackAxis(InputSource.XboxAxis(player,axis),XInputProbe.AxisValue(state,axis));
+                for (int b=0; b<XInputProbe.ButtonBits.Length; b++)
+                    TrackButton(InputSource.XboxButton(player,b),XInputProbe.ButtonDown(state,b));
+            }
             foreach (Device d in joysticks)
             {
                 d.Poll();
@@ -182,15 +195,6 @@ namespace TurboTad
                         TrackAxis(InputSource.Joystick(d.Identity,axis,true),d.Values[axis]);
                 for (int b=0; b<Math.Min(32,(int)d.Caps.Buttons); b++)
                     TrackButton(InputSource.Joystick(d.Identity,b,false),(d.Buttons & (1U << b)) != 0);
-            }
-            for (int player=0; player<4; player++)
-            {
-                XInputProbe.State state; string issue;
-                if (!XInputProbe.TryRead((uint)player,out state,out issue)) continue;
-                for (int axis=0; axis<6; axis++)
-                    TrackAxis(InputSource.XboxAxis(player,axis),XInputProbe.AxisValue(state,axis));
-                for (int b=0; b<XInputProbe.ButtonBits.Length; b++)
-                    TrackButton(InputSource.XboxButton(player,b),XInputProbe.ButtonDown(state,b));
             }
         }
     }
