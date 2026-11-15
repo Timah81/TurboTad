@@ -87,9 +87,13 @@ internal static class InputMapperUiSelfTest
             XmlElement xboxAnalog = xbox.CreateElement("Analog");
             xboxAnalog.SetAttribute("kind", "xaxis"); xboxAnalog.SetAttribute("device", "xinput:0"); xboxAnalog.SetAttribute("code", "0");
             xboxRow.AppendChild(xboxAnalog);
-            XmlElement xboxBoost = xbox.CreateElement("Boost");
+            // Saving a mapping always creates one Boost node, even when unassigned.
+            // Update that existing node instead of adding a duplicate that the loader ignores.
+            XmlElement xboxBoost = xbox.DocumentElement["UniversalInput"]["Boost"];
+            if (xboxBoost == null) throw new Exception("Xbox test fixture is missing its Boost node");
             xboxBoost.SetAttribute("kind", "xbutton"); xboxBoost.SetAttribute("device", "xinput:0"); xboxBoost.SetAttribute("code", "10");
-            xbox.DocumentElement["UniversalInput"].AppendChild(xboxBoost);
+            if (xbox.DocumentElement["UniversalInput"].SelectNodes("Boost").Count != 1)
+                throw new Exception("Xbox test fixture created duplicate Boost nodes");
             xbox.Save(mapping);
             using(Form f=(Form)Activator.CreateInstance(t,new object[]{root}))
             {
