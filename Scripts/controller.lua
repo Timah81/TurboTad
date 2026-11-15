@@ -159,8 +159,9 @@ function M.new(core,config)
             local world=core.world_thrust(axes,pawn:GetActorForwardVector(),
                 pawn:GetActorRightVector(),pawn:GetActorUpVector(),settings.ForwardScale,settings.StrafeScale,settings.VerticalScale)
             pawn:ConsumeMovementInputVector()
-            pawn:AddMovementInput(world,1,false)
+            -- Guard native suppression during TurboTad's own movement and rotation calls.
             self.injecting=true
+            pawn:AddMovementInput(world,1,false)
             local s=config.RotationInputScale or 1
             pawn:AddInputRotator({Pitch=axes[4]*(settings.PitchScale or s),
                 Yaw=axes[5]*(settings.YawScale or s),Roll=axes[6]*(settings.RollScale or s)})
