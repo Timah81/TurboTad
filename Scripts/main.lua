@@ -96,6 +96,55 @@ local function onTick(context,delta)
         writeBoostStatus(false)
     end
 end
+-- TT native look isolation TEST (Xbox): leave the camera component intact.
+-- Zero only native PlayerController yaw/pitch input when TurboTad owns the
+-- locally piloted Tadpole. Hooks are scoped to that vehicle, not menus/on-foot.
+-- Read first-hit diagnostics in ../look-suppression-test.log.
+local lookTestLog=scripts..'../look-suppression-test.log'
+local lookHits={Yaw=0,Pitch=0}
+local lookErrors={}
+local function recordLook(message)
+    pcall(function()
+        local f=io.open(lookTestLog,'a')
+        if f then
+            f:write(os.date('!%Y-%m-%dT%H:%M:%SZ '), '[TurboTad Look TEST] ',message,'\n')
+            f:close()
+        end
+    end)
+end
+local function filterNativeLook(axis,context,amount)
+    local ok,err=pcall(function()
+        local pc=context:get()
+        if not valid(pc) or not controller.target then return end
+        local pawn=pc:K2_GetPawn()
+        if not controller:owns(pawn) or not controller:eligible(pawn) then return end
+        if not controller:inputAllowed(pawn) then return end
+        amount:set(0)
+        lookHits[axis]=lookHits[axis]+1
+        if lookHits[axis]==1 then
+            recordLook(axis..' first native camera input suppressed while piloting')
+        end
+    end)
+    if not ok and not lookErrors[axis] then
+        lookErrors[axis]=true
+        recordLook(axis..' suppression hook error: '..tostring(err))
+    end
+end
+local function registerNativeLook(axis,path)
+    local ok,preId=pcall(function()
+        return RegisterHook(path,function(context,amount)
+            filterNativeLook(axis,context,amount)
+        end)
+    end)
+    if ok and preId~=nil then
+        recordLook(axis..' hook registered: '..path)
+    else
+        recordLook(axis..' hook unavailable (flight controls unaffected): '..tostring(preId))
+    end
+end
+registerNativeLook('Yaw','/Script/Engine.PlayerController:AddYawInput')
+registerNativeLook('Pitch','/Script/Engine.PlayerController:AddPitchInput')
+
 -- Suppress the stock look/banking input only while this mod owns the local vehicle.
 local ok,err=pcall(function()
     RegisterHook('/Script/Subnautica2.SN2Tadpole:AddInputRotator',function(context,rotator)
