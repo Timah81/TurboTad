@@ -1,5 +1,4 @@
--- Personal audio test build. T6S2 publishes a successful boost token to the companion.
-print('[TurboTad] 0.3.15A BOOST SOUND TRIGGER loaded; status protocol T6S2 active.')
+-- TurboTad runtime. T6S2 remains the boost-status protocol.
 local source=debug.getinfo(1,'S').source:gsub('^@','')
 local scripts=assert(source:match('^(.*[/\\])'),'Cannot locate mod script directory')
 local core=dofile(scripts..'core.lua')
@@ -96,22 +95,9 @@ local function onTick(context,delta)
         writeBoostStatus(false)
     end
 end
--- TT native look isolation TEST (Xbox): leave the camera component intact.
--- Zero only native PlayerController yaw/pitch input when TurboTad owns the
--- locally piloted Tadpole. Hooks are scoped to that vehicle, not menus/on-foot.
--- Read first-hit diagnostics in ../look-suppression-test.log.
-local lookTestLog=scripts..'../look-suppression-test.log'
-local lookHits={Yaw=0,Pitch=0}
+-- Stock PlayerController look input must be suppressed only while TurboTad
+-- controls the eligible, locally piloted Tadpole. Preserve this flight hook.
 local lookErrors={}
-local function recordLook(message)
-    pcall(function()
-        local f=io.open(lookTestLog,'a')
-        if f then
-            f:write(os.date('!%Y-%m-%dT%H:%M:%SZ '), '[TurboTad Look TEST] ',message,'\n')
-            f:close()
-        end
-    end)
-end
 local function filterNativeLook(axis,context,amount)
     local ok,err=pcall(function()
         local pc=context:get()
@@ -120,14 +106,10 @@ local function filterNativeLook(axis,context,amount)
         if not controller:owns(pawn) or not controller:eligible(pawn) then return end
         if not controller:inputAllowed(pawn) then return end
         amount:set(0)
-        lookHits[axis]=lookHits[axis]+1
-        if lookHits[axis]==1 then
-            recordLook(axis..' first native camera input suppressed while piloting')
-        end
     end)
     if not ok and not lookErrors[axis] then
         lookErrors[axis]=true
-        recordLook(axis..' suppression hook error: '..tostring(err))
+        print('[TurboTad] native '..axis..' look suppression error: '..tostring(err))
     end
 end
 local function registerNativeLook(axis,path)
@@ -136,33 +118,17 @@ local function registerNativeLook(axis,path)
             filterNativeLook(axis,context,amount)
         end)
     end)
-    if ok and preId~=nil then
-        recordLook(axis..' hook registered: '..path)
-    else
-        recordLook(axis..' hook unavailable (flight controls unaffected): '..tostring(preId))
+    if not ok or preId==nil then
+        print('[TurboTad] native '..axis..' look hook unavailable: '..tostring(preId))
     end
 end
 registerNativeLook('Yaw','/Script/Engine.PlayerController:AddYawInput')
 registerNativeLook('Pitch','/Script/Engine.PlayerController:AddPitchInput')
 
--- ISOLATED VERTICAL TEST: The stock IA_Ascend route was observed as a
--- world-Z +/-1 vector at PawnMovementComponent:AddInputVector while the
--- helper vertical command remained zero. Zero only those exact native
--- world-vertical vectors, only for TurboTad's eligible locally piloted
--- Tadpole. Never touch our own AddMovementInput injection or arbitrary
--- vectors. This patch is not a proven game-tested fix.
-local ascendTestLog=scripts..'../ascend-suppression-test.log'
-local ascendHits={Up=0,Down=0}
+-- Suppress stock world-vertical movement while TurboTad owns the locally
+-- piloted Tadpole so vertical thrust remains relative to the sub's orientation.
+-- Keep the exact vector, eligibility and injection guards unchanged.
 local ascendErrorLogged=false
-local function recordAscend(message)
-    pcall(function()
-        local f=io.open(ascendTestLog,'a')
-        if f then
-            f:write(os.date('!%Y-%m-%dT%H:%M:%SZ '),'[TurboTad Ascend TEST] ',message,'\n')
-            f:close()
-        end
-    end)
-end
 local function filterNativeAscend(context,worldVector)
     local ok,err=pcall(function()
         if controller.injecting or not controller.target then return end
@@ -179,15 +145,10 @@ local function filterNativeAscend(context,worldVector)
         if math.abs(x)>0.001 or math.abs(y)>0.001 or
             math.abs(math.abs(z)-1)>0.001 then return end
         v.X=0;v.Y=0;v.Z=0
-        local dir=z>0 and 'Up' or 'Down'
-        ascendHits[dir]=ascendHits[dir]+1
-        if ascendHits[dir]==1 or ascendHits[dir]%300==0 then
-            recordAscend(dir..' native world-Z input suppressed; count='..ascendHits[dir])
-        end
     end)
     if not ok and not ascendErrorLogged then
         ascendErrorLogged=true
-        recordAscend('suppression unavailable (input unchanged): '..tostring(err))
+        print('[TurboTad] vertical suppression error: '..tostring(err))
     end
 end
 local ascendRegistered,ascendPreId=pcall(function()
@@ -196,10 +157,8 @@ local ascendRegistered,ascendPreId=pcall(function()
             filterNativeAscend(context,worldVector)
         end)
 end)
-if ascendRegistered and ascendPreId~=nil then
-    recordAscend('hook registered; only world-Z +/-1 native input is eligible for filtering')
-else
-    recordAscend('hook unavailable (input unchanged): '..tostring(ascendPreId))
+if not ascendRegistered or ascendPreId==nil then
+    print('[TurboTad] vertical hook unavailable: '..tostring(ascendPreId))
 end
 
 -- Suppress the stock look/banking input only while this mod owns the local vehicle.
