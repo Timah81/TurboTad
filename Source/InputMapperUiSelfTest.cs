@@ -98,8 +98,16 @@ internal static class InputMapperUiSelfTest
             using(Form f=(Form)Activator.CreateInstance(t,new object[]{root}))
             {
                 if(t.GetField("mappingLoadError",Flags).GetValue(f)!=null) throw new Exception("Xbox profile failed to load while controller unplugged");
+                CheckBox xboxTrial = (CheckBox)t.GetField("xboxFlightTest",Flags).GetValue(f);
+                if(xboxTrial.Checked) throw new Exception("Xbox flight test was enabled by default");
                 Call(t,f,"StartControls");
-                if((bool)t.GetField("running",Flags).GetValue(f)) throw new Exception("Xbox binding was allowed to drive native game controls");
+                if((bool)t.GetField("running",Flags).GetValue(f)) throw new Exception("Xbox binding started without explicit opt-in");
+                xboxTrial.Checked = true;
+                if(!xboxTrial.Checked) throw new Exception("User could not opt in to Xbox flight test");
+                // Turning the experiment off must stop active flight input immediately.
+                t.GetField("running",Flags).SetValue(f,true);
+                xboxTrial.Checked = false;
+                if((bool)t.GetField("running",Flags).GetValue(f)) throw new Exception("Xbox test opt-out did not stop controls");
                 Call(t,f,"SaveMapping");
                 config.Load(mapping);
                 XmlElement savedXbox=(XmlElement)config.SelectSingleNode("/TurboTad/UniversalInput/Binding[@row='0']/Analog");

@@ -203,6 +203,8 @@ namespace TurboTad
         private readonly Label prompt = new Label();
         private readonly Label status = new Label();
         private readonly Button start = new Button();
+        // This is deliberately session-only. Do not persist an experimental input takeover.
+        private readonly CheckBox xboxFlightTest = new CheckBox();
         private readonly NumericUpDown deadzone = new DeferredNumericUpDown();
         private readonly NumericUpDown[] rotationRates = new NumericUpDown[3];
         private readonly NumericUpDown[] movementRates = new NumericUpDown[3];
@@ -465,6 +467,14 @@ namespace TurboTad
             Button loadProfile = ThemeButton(input, "LOAD PROFILE", 606, 483, 157, 35, false);
             loadProfile.Click += delegate { ImportInputProfile(); };
             UiLabel(input, "Profiles store input bindings only.", 435, 525, 545, 24, 9F, Muted);
+            // Temporary safety gate: changing this setting immediately stops active controls.
+            // This flag must NOT be saved or restored from mapping.xml or a user profile.
+            xboxFlightTest.SetBounds(22, 526, 407, 29);
+            xboxFlightTest.Text = "ENABLE XBOX FLIGHT TEST (RESETS OFF)";
+            xboxFlightTest.ForeColor = Orange;
+            xboxFlightTest.BackColor = Color.Transparent;
+            xboxFlightTest.CheckedChanged += delegate { StopControls(); };
+            input.Controls.Add(xboxFlightTest);
             // Deliberately read-only: XInput detection must not change mappings or game controls.
             Button testXboxInput = ThemeButton(input, "TEST XBOX INPUT", 782, 483, 255, 35, false);
             testXboxInput.Click += delegate { using (XInputDiagnosticDialog dialog = new XInputDiagnosticDialog()) dialog.ShowDialog(this); };
@@ -836,11 +846,12 @@ namespace TurboTad
 
         private void StartControls()
         {
-            // Xbox flight input would currently compete with the game's native controller mapping.
-            // Permit mapping/preview/save tests, but never publish Xbox-driven flight until isolation is tested.
-            if (HasXboxMapping())
+            // The in-game controller already suppresses stock Tadpole look/rotation and
+            // consumes pending stock movement. Test whether that covers Xbox input too.
+            // Opt-in is temporary and explicitly reset on every helper launch.
+            if (HasXboxMapping() && !xboxFlightTest.Checked)
             {
-                prompt.Text = "Xbox bindings are preview-only until native game control conflicts are resolved.";
+                prompt.Text = "Xbox bindings are preview-only. Enable XBOX FLIGHT TEST to try in-game.";
                 return;
             }
             double[] values;
