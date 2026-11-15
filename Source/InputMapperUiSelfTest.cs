@@ -7,6 +7,26 @@ internal static class InputMapperUiSelfTest
 {
     private static BindingFlags Flags = BindingFlags.Instance | BindingFlags.NonPublic;
     private static object Call(Type t, object f, string name, params object[] args) { return t.GetMethod(name, Flags).Invoke(f, args); }
+    private static void AssertSameXboxAxisOptions(ComboBox[] choices)
+    {
+        string expected = null;
+        for (int row = 0; row < choices.Length; row++)
+        {
+            System.Collections.Generic.List<string> items = new System.Collections.Generic.List<string>();
+            System.Collections.Generic.HashSet<string> unique = new System.Collections.Generic.HashSet<string>();
+            foreach (object candidate in choices[row].Items)
+            {
+                string label = candidate.ToString();
+                if (!label.StartsWith("Xbox ", StringComparison.Ordinal)) continue;
+                if (!unique.Add(label)) throw new Exception("Duplicate Xbox axis in flight row " + row + ": " + label);
+                items.Add(label);
+            }
+            string actual = string.Join("|", items.ToArray());
+            if (expected == null) expected = actual;
+            else if (!string.Equals(expected, actual, StringComparison.Ordinal))
+                throw new Exception("Xbox analog options differ between flight row 0 and row " + row);
+        }
+    }
     [STAThread] private static int Main(string[] args)
     {
         try
@@ -147,9 +167,19 @@ internal static class InputMapperUiSelfTest
                     throw new Exception("Xbox axis manual inversion was lost");
                 XmlElement savedBoost=(XmlElement)config.SelectSingleNode("/TurboTad/UniversalInput/Boost");
                 if(savedBoost==null || savedBoost.GetAttribute("kind")!="xbutton")throw new Exception("Xbox boost binding did not roundtrip");
+                // Saved Xbox bindings must populate all six choices for that player,
+                // even on a machine where the physical pad is disconnected.
+                ComboBox[] choices = (ComboBox[])t.GetField("choices",Flags).GetValue(f);
+                AssertSameXboxAxisOptions(choices);
+                for (int row = 0; row < choices.Length; row++)
+                {
+                    int count = 0;
+                    foreach (object candidate in choices[row].Items)
+                        if (candidate.ToString().StartsWith("Xbox 1 / ", StringComparison.Ordinal)) count++;
+                    if (count != 6) throw new Exception("Saved offline Xbox axes missing in row " + row);
+                }
                 // Regression: the Xbox can wake after the initial joystick/device scan.
                 // Simulate that change without requiring a physical controller in CI.
-                ComboBox[] choices = (ComboBox[])t.GetField("choices",Flags).GetValue(f);
                 CheckBox[] invert = (CheckBox[])t.GetField("invert",Flags).GetValue(f);
                 bool[] xboxConnected = (bool[])t.GetField("xboxConnected",Flags).GetValue(f);
                 System.Collections.IDictionary baseline = (System.Collections.IDictionary)t.GetField("baseline",Flags).GetValue(f);
@@ -160,16 +190,22 @@ internal static class InputMapperUiSelfTest
                     if (candidate.GetType().GetField("Xbox",BindingFlags.Instance|BindingFlags.NonPublic|BindingFlags.Public).GetValue(candidate)!=null)
                         choices[learnRow].Items.RemoveAt(i);
                 }
-                int before = choices[learnRow].Items.Count;
                 Array.Clear(xboxConnected, 0, xboxConnected.Length);
                 xboxConnected[player] = true;
                 invert[learnRow].Checked = true;
                 Call(t,f,"EnsureXboxLearnCandidates",learnRow);
-                if (choices[learnRow].Items.Count != before + 6)
-                    throw new Exception("Learn failed to discover a late-connected Xbox controller");
+                // Discovery repairs the intentionally divergent row and updates all
+                // others, regardless of which row initiated Learn.
+                AssertSameXboxAxisOptions(choices);
+                for (int row = 0; row < choices.Length; row++)
+                {
+                    int count = 0;
+                    foreach (object candidate in choices[row].Items)
+                        if (candidate.ToString().StartsWith("Xbox 3 / ", StringComparison.Ordinal)) count++;
+                    if (count != 6) throw new Exception("Hotplug Xbox axes missing in row " + row);
+                }
                 Call(t,f,"EnsureXboxLearnCandidates",learnRow);
-                if (choices[learnRow].Items.Count != before + 6)
-                    throw new Exception("Repeated Xbox Learn discovery produced duplicate candidates");
+                AssertSameXboxAxisOptions(choices);
                 for(int axis=0;axis<6;axis++)
                 {
                     string identity="xaxis:xinput:"+player+":"+axis;
