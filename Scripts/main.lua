@@ -145,6 +145,63 @@ end
 registerNativeLook('Yaw','/Script/Engine.PlayerController:AddYawInput')
 registerNativeLook('Pitch','/Script/Engine.PlayerController:AddPitchInput')
 
+-- ISOLATED VERTICAL TEST: The stock IA_Ascend route was observed as a
+-- world-Z +/-1 vector at PawnMovementComponent:AddInputVector while the
+-- helper vertical command remained zero. Zero only those exact native
+-- world-vertical vectors, only for TurboTad's eligible locally piloted
+-- Tadpole. Never touch our own AddMovementInput injection or arbitrary
+-- vectors. This patch is not a proven game-tested fix.
+local ascendTestLog=scripts..'../ascend-suppression-test.log'
+local ascendHits={Up=0,Down=0}
+local ascendErrorLogged=false
+local function recordAscend(message)
+    pcall(function()
+        local f=io.open(ascendTestLog,'a')
+        if f then
+            f:write(os.date('!%Y-%m-%dT%H:%M:%SZ '),'[TurboTad Ascend TEST] ',message,'\n')
+            f:close()
+        end
+    end)
+end
+local function filterNativeAscend(context,worldVector)
+    local ok,err=pcall(function()
+        if controller.injecting or not controller.target then return end
+        local component=context:get()
+        if not valid(component) then return end
+        local pawn=component:GetOwner()
+        if not valid(pawn) or not controller:owns(pawn)
+            or not controller:eligible(pawn) or not controller:inputAllowed(pawn) then return end
+        local v=worldVector:get()
+        if not v then return end
+        local x,y,z=tonumber(v.X),tonumber(v.Y),tonumber(v.Z)
+        if not x or not y or not z then return end
+        -- An unrelated input vector, even one having a Z component, must pass.
+        if math.abs(x)>0.001 or math.abs(y)>0.001 or
+            math.abs(math.abs(z)-1)>0.001 then return end
+        v.X=0;v.Y=0;v.Z=0
+        local dir=z>0 and 'Up' or 'Down'
+        ascendHits[dir]=ascendHits[dir]+1
+        if ascendHits[dir]==1 or ascendHits[dir]%300==0 then
+            recordAscend(dir..' native world-Z input suppressed; count='..ascendHits[dir])
+        end
+    end)
+    if not ok and not ascendErrorLogged then
+        ascendErrorLogged=true
+        recordAscend('suppression unavailable (input unchanged): '..tostring(err))
+    end
+end
+local ascendRegistered,ascendPreId=pcall(function()
+    return RegisterHook('/Script/Engine.PawnMovementComponent:AddInputVector',
+        function(context,worldVector)
+            filterNativeAscend(context,worldVector)
+        end)
+end)
+if ascendRegistered and ascendPreId~=nil then
+    recordAscend('hook registered; only world-Z +/-1 native input is eligible for filtering')
+else
+    recordAscend('hook unavailable (input unchanged): '..tostring(ascendPreId))
+end
+
 -- Suppress the stock look/banking input only while this mod owns the local vehicle.
 local ok,err=pcall(function()
     RegisterHook('/Script/Subnautica2.SN2Tadpole:AddInputRotator',function(context,rotator)
