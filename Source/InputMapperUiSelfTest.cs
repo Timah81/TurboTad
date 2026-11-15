@@ -98,16 +98,11 @@ internal static class InputMapperUiSelfTest
             using(Form f=(Form)Activator.CreateInstance(t,new object[]{root}))
             {
                 if(t.GetField("mappingLoadError",Flags).GetValue(f)!=null) throw new Exception("Xbox profile failed to load while controller unplugged");
-                CheckBox xboxTrial = (CheckBox)t.GetField("xboxFlightTest",Flags).GetValue(f);
-                if(xboxTrial.Checked) throw new Exception("Xbox flight test was enabled by default");
+                if(t.GetField("xboxFlightTest",Flags)!=null) throw new Exception("Obsolete Xbox opt-in checkbox remains");
+                // No special opt-in: an unavailable Xbox still fails the usual
+                // mapping validation, without activating any flight output.
                 Call(t,f,"StartControls");
-                if((bool)t.GetField("running",Flags).GetValue(f)) throw new Exception("Xbox binding started without explicit opt-in");
-                xboxTrial.Checked = true;
-                if(!xboxTrial.Checked) throw new Exception("User could not opt in to Xbox flight test");
-                // Turning the experiment off must stop active flight input immediately.
-                t.GetField("running",Flags).SetValue(f,true);
-                xboxTrial.Checked = false;
-                if((bool)t.GetField("running",Flags).GetValue(f)) throw new Exception("Xbox test opt-out did not stop controls");
+                if((bool)t.GetField("running",Flags).GetValue(f)) throw new Exception("Disconnected Xbox mapping started");
                 Call(t,f,"SaveMapping");
                 config.Load(mapping);
                 XmlElement savedXbox=(XmlElement)config.SelectSingleNode("/TurboTad/UniversalInput/Binding[@row='0']/Analog");
@@ -135,12 +130,12 @@ internal static class InputMapperUiSelfTest
                 xboxConnected[player] = true;
                 invert[learnRow].Checked = true;
                 Call(t,f,"EnsureXboxLearnCandidates",learnRow);
-                if (choices[learnRow].Items.Count != before + 4)
+                if (choices[learnRow].Items.Count != before + 6)
                     throw new Exception("Learn failed to discover a late-connected Xbox controller");
                 Call(t,f,"EnsureXboxLearnCandidates",learnRow);
-                if (choices[learnRow].Items.Count != before + 4)
+                if (choices[learnRow].Items.Count != before + 6)
                     throw new Exception("Repeated Xbox Learn discovery produced duplicate candidates");
-                for(int axis=0;axis<4;axis++)
+                for(int axis=0;axis<6;axis++)
                 {
                     string identity="xaxis:xinput:"+player+":"+axis;
                     if(!baseline.Contains(identity) || (double)baseline[identity]!=0)
