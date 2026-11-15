@@ -36,6 +36,25 @@ internal static class UiSelfTest
         throw new Exception("Missing GUI heading: " + exactText);
     }
 
+    // All visible numeric editors must permit intermediate typing without
+    // validation on every live .Value read. Internal hidden percent backing
+    // controls (e.g. topSpeed) are intentionally not part of this scan.
+    private static int AssertDeferredEditors(Control parent)
+    {
+        int count = 0;
+        foreach (Control control in parent.Controls)
+        {
+            if (control is NumericUpDown)
+            {
+                if (control.GetType().Name != "DeferredNumericUpDown")
+                    throw new Exception("Numeric editor still validates during typing: " + control.Name);
+                count++;
+            }
+            count += AssertDeferredEditors(control);
+        }
+        return count;
+    }
+
     [STAThread]
     private static int Main(string[] args)
     {
@@ -109,6 +128,11 @@ internal static class UiSelfTest
                 NumericUpDown[] movement = (NumericUpDown[])Field(formType, form, "movementRates");
                 NumericUpDown savedSpeed = (NumericUpDown)Field(formType, form, "topSpeed");
                 NumericUpDown mph = (NumericUpDown)Field(formType, form, "mphInput");
+                int deferredEditors = AssertDeferredEditors(form);
+                if (deferredEditors != 9)
+                    throw new Exception("Expected 9 visible delayed-commit editors, got " + deferredEditors);
+                if (rotation[0].Minimum != 10 || movement[0].Minimum != 10 || mph.Minimum <= 0)
+                    throw new Exception("A real numeric range was changed just to permit typing");
                 // Cosmetic cleanup: no stale explanatory subheadings, even on other tabs.
                 AssertNoLabelContains(form, "No calibrated °/s available");
                 AssertNoLabelContains(form, "Estimated mph from the observed");

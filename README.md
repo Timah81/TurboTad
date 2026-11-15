@@ -12,7 +12,9 @@ A six-degree-of-freedom (6DOF) Tadpole flight-control mod for **Subnautica 2** (
 - A Windows controls GUI for configuring the currently supported joystick setup
 - Optional local, user-selected WAV playback for boost sound
 
-The next planned major feature is the **Universal Input Mapper (UIM)**: user-defined analog axes or two digital directions per flight axis, with controller and keyboard/mouse support. This is a design plan, **not implemented in the initial joystick release**.
+This feature branch contains **Universal Input Mapper stage 1 — a test candidate**. Each flight axis can use a WinMM analog axis or two keyboard/WinMM button directions, with mixed devices, separate boost binding and input-only profiles. Existing joystick mappings and the accepted v7 numeric editors are retained. XInput-specific trigger pairs and relative mouse input remain later stages; this candidate has not passed Windows hardware or in-game acceptance.
+
+To test against an existing working installation, close the game/helper and run `InstallUniversalMapper.cmd`. It compiles and runs isolated tests before replacing the helper and backs up the existing executable and mapping. `RollbackUniversalMapper.cmd` restores that pre-install pair and preserves newer bindings in a separate checkpoint.
 
 ## Architecture
 

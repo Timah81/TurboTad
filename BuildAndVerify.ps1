@@ -14,7 +14,7 @@ $exe = Join-Path $dest 'TurboTad.Controls.exe'
 $assets = Join-Path $sourceRoot 'Assets'
 $css = Join-Path $sourceRoot 'Source'
 $refs = @('/reference:System.dll','/reference:System.Core.dll','/reference:System.Windows.Forms.dll','/reference:System.Drawing.dll','/reference:System.Xml.dll')
-$ui = @( (Join-Path $css 'Controls.cs'), (Join-Path $css 'BoostAudioPicker.cs'), (Join-Path $css 'RateSlider.cs') )
+$ui = @( (Join-Path $css 'Controls.cs'), (Join-Path $css 'BoostAudioPicker.cs'), (Join-Path $css 'RateSlider.cs'), (Join-Path $css 'InputMapper.cs'), (Join-Path $css 'UimControls.cs'), (Join-Path $css 'InputBindingDialog.cs') )
 foreach ($f in $ui) { if (!(Test-Path -LiteralPath $f -PathType Leaf)) { throw ('Source missing: ' + $f) } }
 $icon = Join-Path $assets 'TurboTad.ico'
 $logo = Join-Path $assets 'TurboTadLogo.png'
@@ -35,12 +35,25 @@ $uiExe = Join-Path $dest 'UiSelfTest.exe'
 $uiArgs = @('/nologo','/target:exe','/platform:x64',('/out:' + $uiExe)) + $refs + @((Join-Path $css 'UiSelfTest.cs'))
 & $compiler @uiArgs
 if ($LASTEXITCODE -ne 0) { throw 'GUI self-test compilation failed' }
-$isolated = Join-Path $dest 'IsolatedModRoot'
+$isolated = Join-Path $dest ('IsolatedModRoot_' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path (Join-Path $isolated 'Assets') -Force | Out-Null
 Copy-Item -LiteralPath $icon -Destination (Join-Path $isolated 'Assets\TurboTad.ico')
 Copy-Item -LiteralPath $logo -Destination (Join-Path $isolated 'Assets\TurboTadLogo.png')
 & $uiExe $exe $isolated
 if ($LASTEXITCODE -ne 0) { throw 'GUI self-test failed' }
+$mapperExe = Join-Path $dest 'InputMapperSelfTest.exe'
+$mapperArgs = @('/nologo','/target:exe','/platform:x64',('/out:' + $mapperExe)) + $refs + @((Join-Path $css 'InputMapper.cs'),(Join-Path $css 'InputMapperSelfTest.cs'))
+& $compiler @mapperArgs
+if ($LASTEXITCODE -ne 0) { throw 'Input mapper test compilation failed' }
+& $mapperExe
+if ($LASTEXITCODE -ne 0) { throw 'Input mapper logic test failed' }
+$mapperUiExe = Join-Path $dest 'InputMapperUiSelfTest.exe'
+$mapperUiArgs = @('/nologo','/target:exe','/platform:x64',('/out:' + $mapperUiExe)) + $refs + @((Join-Path $css 'InputMapperUiSelfTest.cs'))
+& $compiler @mapperUiArgs
+if ($LASTEXITCODE -ne 0) { throw 'Mapper GUI test compilation failed' }
+& $mapperUiExe $exe (Join-Path $dest ('IsolatedMapperRoot_' + [guid]::NewGuid().ToString('N')))
+if ($LASTEXITCODE -ne 0) { throw 'Mapper GUI migration/Start/Stop test failed' }
+& (Join-Path $css 'UimRollbackSelfTest.ps1') -RollbackScript (Join-Path $sourceRoot 'RollbackUniversalMapper.ps1')
 Write-Host ('SOURCE BUILD AND TESTS PASSED. Output: ' + $exe) -ForegroundColor Green
 Write-Host ('Built helper SHA-256: ' + (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash)
 Write-Host 'This verifies compilation and self-tests, NOT equivalence to the previously gameplay-tested exe.'
