@@ -77,6 +77,20 @@ internal static class InputMapperSelfTest
             Check(!InputMapper.PreferLearnCandidate(false, 1.0, true, .65), "WinMM cannot override XInput");
             Check(InputMapper.PreferLearnCandidate(false, .85, false, .60), "WinMM-only strongest motion still learns");
             Check(!InputMapper.PreferLearnCandidate(true, .25, false, .80), "below-threshold XInput motion ignored");
+            InputSource mirroredWinmmButton = InputSource.Joystick("3:1118:654:Microsoft PC-joystick driver", 4, false);
+            InputSource xinputBumper = InputSource.XboxButton(0, 8); // LB
+            Check(InputMapper.PreferButtonLearnCandidate(mirroredWinmmButton, null),
+                "WinMM-only button can start capture");
+            Check(InputMapper.PreferButtonLearnCandidate(xinputBumper, mirroredWinmmButton),
+                "XInput button overrides mirrored WinMM button");
+            Check(!InputMapper.PreferButtonLearnCandidate(mirroredWinmmButton, xinputBumper),
+                "WinMM cannot override captured XInput button");
+            Check(InputMapper.PreferButtonLearnCandidate(xinputBumper, InputSource.Key(66)),
+                "XInput button also wins over keyboard-translated button");
+            Check(!InputMapper.PreferButtonLearnCandidate(InputSource.Key(66), xinputBumper),
+                "keyboard event cannot replace XInput button");
+            Check(!InputMapper.PreferButtonLearnCandidate(null, mirroredWinmmButton),
+                "missing candidate cannot replace a real button");
             InputSource xboxAxis = InputSource.XboxAxis(0, 1);
             InputSource xboxButton = InputSource.XboxButton(0, 10); // A
             Check(xboxAxis.Valid(true) && !xboxAxis.Valid(false), "Xbox stick source is analog only");
