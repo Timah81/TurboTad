@@ -68,9 +68,10 @@ namespace TurboTad
             "L3", "R3", "LB", "RB", "A", "B", "X", "Y"
         };
 
+        internal const int AxisCount = 6;
         internal static string AxisName(int axis)
         {
-            string[] names = { "LX", "LY", "RX", "RY" };
+            string[] names = { "LX", "LY", "RX", "RY", "LT", "RT" };
             return axis >= 0 && axis < names.Length ? names[axis] : "?";
         }
         internal static string ButtonName(int button)
@@ -84,6 +85,9 @@ namespace TurboTad
                 case 1: v = state.Pad.LeftY; break;
                 case 2: v = state.Pad.RightX; break;
                 case 3: v = state.Pad.RightY; break;
+                // Triggers are separate unipolar (0..1) proportional inputs.
+                case 4: return state.Pad.LeftTrigger / 255.0;
+                case 5: return state.Pad.RightTrigger / 255.0;
                 default: throw new ArgumentOutOfRangeException("axis");
             }
             return v < 0 ? v / 32768.0 : v / 32767.0;
