@@ -273,7 +273,7 @@ namespace TurboTad
 
         private void BuildBetaflightInterface()
         {
-            Text = "TurboTad | Universal Input Mapper - TEST 1";
+            Text = "TurboTad | Universal Input Mapper - TEST 1A";
             ClientSize = new Size(1120, 800);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -1033,7 +1033,7 @@ namespace TurboTad
                 if (decimal.TryParse(top.GetAttribute("boostCooldown"), NumberStyles.Number, CultureInfo.InvariantCulture, out dz))
                     boostCooldown.Value = Math.Max(boostCooldown.Minimum, Math.Min(boostCooldown.Maximum, dz));
                 LoadLegacyBindings(top);
-                LoadUniversalBindings(top["UniversalInput"]);
+                LoadStoredUniversalBindings(top["UniversalInput"]);
             }
             catch (Exception e) { mappingLoadError = e.Message; prompt.Text = "Saved mapping preserved; could not load: " + e.Message; }
         }

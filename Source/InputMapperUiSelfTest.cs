@@ -60,6 +60,26 @@ internal static class InputMapperUiSelfTest
                 for(int i=4;i<10;i++) if(Double.Parse(words[i],System.Globalization.CultureInfo.InvariantCulture)!=0) throw new Exception("Stop sent motion");
                 f.Close();
             }
+            XmlDocument savedConflict = new XmlDocument(); savedConflict.LoadXml(config.OuterXml);
+            ((XmlElement)savedConflict.SelectSingleNode("/TurboTad/UniversalInput/Binding[@row='1']/Negative")).SetAttribute("code","65");
+            savedConflict.Save(mapping);
+            using(Form f = (Form)Activator.CreateInstance(t,new object[]{root}))
+            {
+                if(t.GetField("mappingLoadError",Flags).GetValue(f)!=null)
+                    throw new Exception("Readable saved conflict is latched as an unrecoverable load error");
+                Call(t,f,"StartControls");
+                if((bool)t.GetField("running",Flags).GetValue(f))throw new Exception("Conflicting saved bindings started");
+                string conflict=(string)t.GetField("mappingError",Flags).GetValue(f);
+                if(conflict.IndexOf("Forward",StringComparison.OrdinalIgnoreCase)<0 || conflict.IndexOf("Strafe",StringComparison.OrdinalIgnoreCase)<0)
+                    throw new Exception("Conflict does not name both affected axes");
+                Array pairs = (Array)t.GetField("directionPairs",Flags).GetValue(f);
+                object rowOne = pairs.GetValue(1);
+                object negative = rowOne.GetType().GetField("Negative",Flags).GetValue(rowOne);
+                negative.GetType().GetField("Code",Flags).SetValue(negative,67);
+                Call(t,f,"StartControls");
+                if(!(bool)t.GetField("running",Flags).GetValue(f))throw new Exception("Corrected saved conflict still blocks Start");
+                Call(t,f,"StopControls"); f.Close();
+            }
             string invalid = "<TurboTad><UniversalInput version='99'/></TurboTad>";
             File.WriteAllText(mapping,invalid);
             using(Form f = (Form)Activator.CreateInstance(t,new object[]{root}))

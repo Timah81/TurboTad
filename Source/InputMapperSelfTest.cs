@@ -55,6 +55,17 @@ internal static class InputMapperSelfTest
             Check(!InputMapper.ValidateSources(new AxisBinding[]{pair,pair}, null, out error), "duplicate axis sources rejected");
             Check(InputMapper.ValidateSources(unique, InputSource.Key(90), out error), "independent boost accepted");
             pair.Positive = right;
+            string device1 = "0:231:12:Microsoft PC-joystick driver";
+            string device2 = "1:231:12:Microsoft PC-joystick driver";
+            AxisBinding[] screenshotAxes = new AxisBinding[] {
+                new AxisBinding { Analog = InputSource.Joystick(device1, 1, true) },
+                new AxisBinding { Analog = InputSource.Joystick(device2, 3, true) },
+                new AxisBinding { Analog = InputSource.Joystick(device1, 3, true) },
+                new AxisBinding { Analog = InputSource.Joystick(device1, 5, true) },
+                new AxisBinding { Analog = InputSource.Joystick(device1, 2, true) },
+                new AxisBinding { Analog = InputSource.Joystick(device2, 2, true), Invert = true }
+            };
+            Check(InputMapper.ValidateSources(screenshotAxes, null, out error), "six distinct analog axes from user screenshot are accepted");
             XmlDocument forged = new XmlDocument(); forged.LoadXml("<Key kind='key' code='65' device='alternate'/>");
             InputSource importedKey = InputMapper.ReadSource(forged.DocumentElement, false);
             Check(importedKey.Identity == left.Identity, "keyboard identity cannot be changed by device attribute");

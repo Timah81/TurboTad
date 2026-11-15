@@ -108,6 +108,14 @@ namespace TurboTad
         }
         private void LoadUniversalBindings(XmlElement element)
         {
+            ApplyUniversalBindings(element, false);
+        }
+        private void LoadStoredUniversalBindings(XmlElement element)
+        {
+            ApplyUniversalBindings(element, true);
+        }
+        private void ApplyUniversalBindings(XmlElement element, bool allowEditableConflicts)
+        {
             if(element==null)return;
             if(element.GetAttribute("version")!="1")throw new FormatException("Unsupported input profile version");
             AxisBinding[] parsed=new AxisBinding[6];
@@ -124,7 +132,8 @@ namespace TurboTad
             InputSource boost=InputMapper.ReadSource(element["Boost"],false);
             if(boost!=null&&boost.Kind!="key")OfflineDevice(boost.Device);
             string conflict;
-            if (!InputMapper.ValidateSources(parsed, boost, out conflict)) throw new FormatException(conflict);
+            bool valid = InputMapper.ValidateSources(parsed, boost, out conflict);
+            if (!valid && !allowEditableConflicts) throw new FormatException(conflict);
             for(int i=0;i<6;i++)
             {
                 inputModes[i].SelectedIndex=parsed[i].Digital?1:0;
@@ -133,6 +142,7 @@ namespace TurboTad
                 RefreshInputRow(i);
             }
             SelectBoostSource(boost);
+            if (!valid) prompt.Text = "Fix mapping: " + conflict + ".";
         }
         private void LoadLegacyBindings(XmlElement top)
         {

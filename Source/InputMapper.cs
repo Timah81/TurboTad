@@ -88,12 +88,24 @@ namespace TurboTad
 
         internal static bool ValidateSources(AxisBinding[] axes, InputSource boost, out string error)
         {
-            HashSet<string> used = new HashSet<string>();
-            foreach (AxisBinding axis in axes)
-                foreach (InputSource source in axis.Sources)
-                    if (!used.Add(source.Identity)) { error = "One control is assigned to more than one action"; return false; }
-            if (boost != null && (!boost.Valid(false) || !used.Add(boost.Identity)))
-            { error = "Boost needs its own button or key"; return false; }
+            string[] names = { "Forward / reverse", "Strafe right / left", "Thrust up / down", "Pitch up / down", "Yaw right / left", "Roll right / left" };
+            Dictionary<string, string> used = new Dictionary<string, string>();
+            for (int row = 0; row < axes.Length; row++)
+                foreach (InputSource source in axes[row].Sources)
+                {
+                    string previous;
+                    string action = row < names.Length ? names[row] : "Axis " + (row + 1);
+                    if (used.TryGetValue(source.Identity, out previous))
+                    { error = previous + " and " + action + " use the same control"; return false; }
+                    used.Add(source.Identity, action);
+                }
+            if (boost != null)
+            {
+                string previous;
+                if (!boost.Valid(false)) { error = "Invalid boost button or key"; return false; }
+                if (used.TryGetValue(boost.Identity, out previous))
+                { error = "Boost and " + previous + " use the same control"; return false; }
+            }
             error = null; return true;
         }
 
