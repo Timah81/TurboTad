@@ -34,12 +34,17 @@ local function keyName(mapping)
     return ok and name or '<key inaccessible>'
 end
 local function dump()
-    local pawn = FindFirstOf('BP_Tadpole_C')
-    if not valid(pawn) then return false end
-    local ok, pilot = pcall(function()
-        return pawn:IsLocallyControlled() and pawn:IsPiloted()
-    end)
-    if not ok or not pilot then return false end
+    -- Multiple Tadpoles may be loaded; inspect the locally piloted instance.
+    local pawn = nil
+    for _, candidate in ipairs(FindAllOf('BP_Tadpole_C') or {}) do
+        if valid(candidate) then
+            local ok, piloted = pcall(function()
+                return candidate:IsLocallyControlled() and candidate:IsPiloted()
+            end)
+            if ok and piloted then pawn = candidate; break end
+        end
+    end
+    if not pawn then return false end
 
     local pc = pawn:GetController()
     if not valid(pc) then return false end
