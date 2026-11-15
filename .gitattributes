@@ -1,0 +1,6 @@
+# Preserve the verified source checkpoint's original line endings on affected files.
+/*.cmd -text
+/Scripts/config.lua -text
+/Scripts/controller.lua -text
+/Scripts/hud.lua -text
+/Scripts/velocity.lua -text
