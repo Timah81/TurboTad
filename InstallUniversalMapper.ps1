@@ -59,11 +59,13 @@ try {
     $replacementStarted = $true
     Copy-Item -LiteralPath $compiled -Destination $target -Force
     if ((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $compiled -Algorithm SHA256).Hash) { throw 'Installed helper hash did not verify.' }
-    Write-Host 'Universal Input Mapper stage 1 TEST helper installed.' -ForegroundColor Green
+    Write-Host 'TurboTad Device Discovery TEST helper installed.' -ForegroundColor Green
     Write-Host ('Rollback backup: ' + $backupDir)
-    Write-Host 'INPUT MAPPING: choose Analog or Buttons on each row. No preset bindings are assigned.'
-    Write-Host 'Keyboard/WinMM button pairs and binding profiles are included. XInput trigger pairs and mouse are later stages.'
-    Write-Host 'The game has not been tested by this installer. First confirm existing joystick flight, then test new bindings.'
+    Write-Host 'INPUT MAPPING: choose Analog or Buttons on each row; your existing mappings are retained.'
+    Write-Host 'DISCOVER CONTROLS: release controls, start scanning, move each axis, squeeze triggers and press buttons.'
+    Write-Host 'Discovered inputs are listed first; unscanned supported inputs remain selectable.'
+    Write-Host 'Discovery inventory: separate device-discovery.xml; existing mapping.xml is preserved.'
+    Write-Host 'This installer checks the build, not live hardware behavior. Test the helper in-game before releasing.'
 }
 catch {
     $message = $_.Exception.Message
