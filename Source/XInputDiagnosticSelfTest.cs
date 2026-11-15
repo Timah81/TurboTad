@@ -29,9 +29,18 @@ namespace TurboTad
             Check(XInputProbe.AxisValue(s,0) == -1 && XInputProbe.AxisValue(s,1) == 1, "stick endpoints");
             Check(Math.Abs(XInputProbe.AxisValue(s,4) - 64.0/255.0) < .00001, "LT proportional");
             Check(XInputProbe.AxisValue(s,5) == 1, "RT full pull");
+            Check(XInputProbe.AxisCount == 7 && XInputProbe.AxisName(6) == "LT + RT (paired axis)",
+                "paired trigger is a selectable seventh analog source");
+            Check(Math.Abs(XInputProbe.AxisValue(s,6) - 191.0/255.0) < .00001,
+                "paired RT minus LT remains proportional");
             Check(XInputProbe.AxisName(4) == "LT" && XInputProbe.AxisName(5) == "RT", "trigger axis names");
+            s.Pad.LeftTrigger = 255; s.Pad.RightTrigger = 0;
+            Check(XInputProbe.AxisValue(s,6) == -1, "paired full LT is negative");
+            s.Pad.LeftTrigger = 128; s.Pad.RightTrigger = 128;
+            Check(XInputProbe.AxisValue(s,6) == 0, "paired equal triggers cancel");
             s.Pad.LeftTrigger = 0; s.Pad.RightTrigger = 0;
-            Check(XInputProbe.AxisValue(s,4) == 0 && XInputProbe.AxisValue(s,5) == 0, "released triggers are neutral");
+            Check(XInputProbe.AxisValue(s,4) == 0 && XInputProbe.AxisValue(s,5) == 0 &&
+                XInputProbe.AxisValue(s,6) == 0, "released triggers are neutral");
             Check(Math.Abs(XInputProbe.AxisValue(s,2) + .5) < .0001, "negative stick proportional");
             Check(Math.Abs(XInputProbe.AxisValue(s,3) - .5) < .0001, "positive stick proportional");
             Check(XInputProbe.ButtonDown(s,10) && XInputProbe.ButtonDown(s,8), "Xbox button bits");
