@@ -786,7 +786,7 @@ namespace TurboTad
                     int row = learning;
                     learning = -1;
                     choices[row].SelectedItem = winner;
-                    invert[row].Checked = winner.Device.Values[winner.Axis] < 0;
+                    // Learning identifies an axis only. Inversion is explicitly user-controlled.
                     prompt.Text = labels[row] + " assigned. Release the control, then Learn the next row.";
                 }
             }
