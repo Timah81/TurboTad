@@ -29,7 +29,7 @@ namespace TurboTad
         {
             int slot;
             if (analog) return (Kind == "axis" && !String.IsNullOrEmpty(Device) && Code >= 0 && Code < 6) ||
-                (Kind == "xaxis" && TryXboxPlayer(Device, out slot) && Code >= 0 && Code < 4);
+                (Kind == "xaxis" && TryXboxPlayer(Device, out slot) && Code >= 0 && Code < 6);
             if (Kind == "key") return Code >= 8 && Code <= 254;
             if (Kind == "button") return !String.IsNullOrEmpty(Device) && Code >= 0 && Code < 32;
             return Kind == "xbutton" && TryXboxPlayer(Device, out slot) && Code >= 0 && Code < 14;
@@ -87,6 +87,18 @@ namespace TurboTad
             }
             if (binding.Invert) value = -value;
             return true;
+        }
+
+        // Prefer Xbox XInput when the same gesture is also mirrored as WinMM.
+        // If only a genuine WinMM joystick moves, it still learns normally.
+        internal static bool PreferLearnCandidate(bool candidateXbox, double travel,
+            bool incumbentXbox, double incumbentTravel)
+        {
+            const double threshold = 0.55;
+            if (travel <= threshold) return false;
+            if (incumbentTravel <= threshold) return true;
+            if (candidateXbox != incumbentXbox) return candidateXbox;
+            return travel > incumbentTravel;
         }
 
         internal static bool AreDigitalSourcesReleased(AxisBinding[] axes, IInputFrame frame)
