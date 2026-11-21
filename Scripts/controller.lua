@@ -130,6 +130,21 @@ function M.new(core,config)
                 local camera=pawn.FirstPersonCamera
                 if not valid(camera) then error('Tadpole camera unavailable') end
                 save(camera,'bUsePawnControlRotation',false)
+                -- Tadpole-only fixed acceleration override; release() restores the original.
+                local acceleration=config.TadpoleMaxSwimAcceleration
+                if acceleration~=nil then
+                    if type(acceleration)~='number' or acceleration~=acceleration
+                        or acceleration<=0 or acceleration>50000 then
+                        error('Invalid Tadpole swim acceleration override')
+                    end
+                    local movement=pawn.CharacterMovement
+                    if not valid(movement) then error('Tadpole movement component unavailable') end
+                    local baseline=tonumber(movement.MaxSwimAcceleration)
+                    if not baseline or baseline<=0 or baseline==math.huge then
+                        error('Native swim acceleration unavailable')
+                    end
+                    save(movement,'MaxSwimAcceleration',acceleration)
+                end
             end
             -- Chassis changes may reapply these rates; keep the active instance unlocked.
             pawn.RollCorrectionRate=0
