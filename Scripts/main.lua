@@ -125,9 +125,8 @@ end
 registerNativeLook('Yaw','/Script/Engine.PlayerController:AddYawInput')
 registerNativeLook('Pitch','/Script/Engine.PlayerController:AddPitchInput')
 
--- Suppress stock world-vertical movement while TurboTad owns the locally
--- piloted Tadpole so vertical thrust remains relative to the sub's orientation.
--- Keep the exact vector, eligibility and injection guards unchanged.
+-- Test: suppress native movement input (horizontal and vertical) while TurboTad
+-- owns an eligible locally piloted Tadpole. Its own thrust passes via injecting.
 local ascendErrorLogged=false
 local function filterNativeAscend(context,worldVector)
     local ok,err=pcall(function()
@@ -141,9 +140,8 @@ local function filterNativeAscend(context,worldVector)
         if not v then return end
         local x,y,z=tonumber(v.X),tonumber(v.Y),tonumber(v.Z)
         if not x or not y or not z then return end
-        -- An unrelated input vector, even one having a Z component, must pass.
-        if math.abs(x)>0.001 or math.abs(y)>0.001 or
-            math.abs(math.abs(z)-1)>0.001 then return end
+        -- With TurboTad owning this pawn, do not mix stock XInput thrust with
+        -- TurboTad's six-axis motion. Leave non-owned/on-foot input untouched.
         v.X=0;v.Y=0;v.Z=0
     end)
     if not ok and not ascendErrorLogged then
