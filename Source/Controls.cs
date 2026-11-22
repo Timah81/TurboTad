@@ -210,7 +210,7 @@ namespace TurboTad
         private System.Drawing.Icon applicationIcon;
         private decimal hudRight = 420M, hudBottom = 48M;
         private readonly NumericUpDown boostCooldown = new DeferredNumericUpDown();
-        private readonly NumericUpDown topSpeed = new NumericUpDown();
+        private readonly NumericUpDown topSpeed = new DeferredNumericUpDown();
         private readonly ComboBox boostChoice = new ComboBox();
         private readonly Label boostStatus = new Label();
         private readonly Stopwatch statusPoll = Stopwatch.StartNew();
@@ -406,6 +406,13 @@ namespace TurboTad
             topSpeed.Maximum = 400;
             topSpeed.Increment = 1;
             topSpeed.Value = 100;
+            // Expose the existing speed percentage control beside the estimated mph editor.
+            // Both editors and the slider remain bound to the same TopSpeedScale value.
+            topSpeed.SetBounds(731, 65, 103, 32);
+            StyleNumber(topSpeed);
+            speedPanel.Controls.Add(topSpeed);
+            topSpeed.BringToFront();
+            UiLabel(speedPanel, "speed (%)", 741, 99, 100, 22, 9F, Muted);
             mphInput = MakeNumber(speedPanel, 871, 65, 103, 32,
                 Math.Round(BaseMphAtHundred * .25M, 1), Math.Round(BaseMphAtHundred * 4M, 1),
                 Math.Round(BaseMphAtHundred, 1), .2M);
@@ -413,7 +420,7 @@ namespace TurboTad
             mphInput.BringToFront(); // Keep the editable speed value above any surrounding presentation labels.
             UiLabel(speedPanel, "est. mph", 882, 99, 95, 22, 9F, Muted);
             RateSlider speedSlider = new RateSlider(25, 400, 1, 100);
-            speedSlider.SetBounds(19, 66, 827, 36);
+            speedSlider.SetBounds(19, 66, 686, 36);
             speedPanel.Controls.Add(speedSlider);
             BindSlider(speedSlider, topSpeed);
             topSpeed.ValueChanged += delegate { SyncMphFromPercent(); };
