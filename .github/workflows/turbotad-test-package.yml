@@ -1,0 +1,48 @@
+name: TurboTad test Windows package
+on:
+  push:
+    branches:
+      - test/gui-numeric-step-one
+  workflow_dispatch:
+jobs:
+  windows-build:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out tested source
+        uses: actions/checkout@v4
+      - name: Compile and run existing self-tests
+        shell: powershell
+        run: |
+          .\BuildAndVerify.ps1 -OutputDirectory "$env:RUNNER_TEMP\TurboTadVerified"
+      - name: Assemble minimal user-installable test ZIP
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'TurboTadPackage'
+          $mod = Join-Path $root 'ue4ss\Mods\TurboTad'
+          New-Item -ItemType Directory -Path (Join-Path $mod 'Scripts') -Force | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $mod 'Assets') -Force | Out-Null
+          Copy-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'TurboTadVerified\TurboTad.Controls.exe') -Destination $mod
+          Copy-Item -Path 'Scripts\*.lua' -Destination (Join-Path $mod 'Scripts')
+          Copy-Item -Path 'Assets\TurboTad.ico','Assets\TurboTadLogo.png' -Destination (Join-Path $mod 'Assets')
+          New-Item -Path (Join-Path $mod 'enabled.txt') -ItemType File -Force | Out-Null
+          $zip = Join-Path $env:RUNNER_TEMP 'TurboTad_GUI_DynamicAccel_TEST.zip'
+          Compress-Archive -Path (Join-Path $root '*') -DestinationPath $zip -CompressionLevel Optimal
+          if (!(Test-Path $zip)) { throw 'ZIP was not created' }
+          $files = [IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $names = @($files.Entries | ForEach-Object FullName)
+            foreach ($name in @('ue4ss/Mods/TurboTad/TurboTad.Controls.exe','ue4ss/Mods/TurboTad/Scripts/controller.lua','ue4ss/Mods/TurboTad/Scripts/config.lua','ue4ss/Mods/TurboTad/enabled.txt')) {
+              if ($names -notcontains $name) { throw ('Missing ZIP entry: ' + $name) }
+            }
+          } finally { $files.Dispose() }
+          Write-Host ('Test ZIP ready: ' + $zip)
+      - name: Upload installable test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: TurboTad-GUI-DynamicAccel-TEST
+          path: ${{ runner.temp }}\TurboTad_GUI_DynamicAccel_TEST.zip
+          if-no-files-found: error
+          retention-days: 14
