@@ -91,6 +91,11 @@ internal static class UiSelfTest
             }
             using (Form form = (Form)Activator.CreateInstance(formType, new object[] { modRoot }))
             {
+                // Fresh install: boost HUD defaults are shared with the in-game Lua fallback.
+                // A saved mapping.xml, when present, still overrides these values on load.
+                if ((decimal)Field(formType, form, "hudRight") != 400M ||
+                    (decimal)Field(formType, form, "hudBottom") != 50M)
+                    throw new Exception("Incorrect fresh-install boost HUD default position");
                 TabControl tabs = (TabControl)Field(formType, form, "dashboardTabs");
                 if (tabs.TabPages.Count != 3) throw new Exception("Expected 3 GUI tabs");
                 if (tabs.TabPages[2].Text != "BOOST HUD") throw new Exception("Boost HUD tab label is incorrect");
