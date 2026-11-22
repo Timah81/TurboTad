@@ -296,6 +296,8 @@ namespace TurboTad
         private bool updatingMph;
         private string activeInputProfilePath;
         private Label activeProfileLabel;
+        // Unchecked by default: legacy profiles continue to carry only input bindings.
+        private readonly CheckBox includeFlightTuningInProfile = new CheckBox();
         private const decimal BaseMphAtHundred = 22.36936M; // Observed 1000 cm/s swimming cap; estimated, not a live telemetry reading.
 
         private void BuildBetaflightInterface()
@@ -486,7 +488,13 @@ namespace TurboTad
             saveNewProfile.Click += delegate { ExportNewInputProfile(); };
             activeProfileLabel = UiLabel(input, "Active input profile: none", 606, 527, 430, 29, 9F, Muted);
             activeProfileLabel.AutoEllipsis = true;
-            UiLabel(input, "Profiles store input bindings only (not flight tuning).", 435, 563, 545, 24, 9F, Muted);
+            includeFlightTuningInProfile.Text = "Include flight tuning (speed and axis percentages)";
+            includeFlightTuningInProfile.Checked = false;
+            includeFlightTuningInProfile.AutoSize = false;
+            includeFlightTuningInProfile.SetBounds(435, 562, 602, 29);
+            includeFlightTuningInProfile.ForeColor = Color.WhiteSmoke;
+            includeFlightTuningInProfile.BackColor = Color.Transparent;
+            input.Controls.Add(includeFlightTuningInProfile);
             // Deliberately read-only: XInput detection must not change mappings or game controls.
             Button testXboxInput = ThemeButton(input, "TEST XBOX INPUT", 782, 483, 255, 35, false);
             testXboxInput.Click += delegate { using (XInputDiagnosticDialog dialog = new XInputDiagnosticDialog()) dialog.ShowDialog(this); };
