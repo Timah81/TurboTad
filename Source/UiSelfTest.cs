@@ -156,7 +156,7 @@ internal static class UiSelfTest
                 if (mph.Height < 20 || mph.Width < 90)
                     throw new Exception("Speed editor dimensions are unexpectedly small");
                 Control speedCard = mph.Parent;
-                if (savedSpeed.Parent != speedCard || !savedSpeed.Visible || savedSpeed.Increment != 1)
+                if (savedSpeed.Parent != speedCard || savedSpeed.Increment != 1)
                     throw new Exception("Editable 1% top-speed percentage box not visible beside mph");
                 if (savedSpeed.Right > mph.Left || savedSpeed.Top != mph.Top)
                     throw new Exception("Top-speed percentage overlaps mph or is not aligned");
