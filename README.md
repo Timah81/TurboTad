@@ -2,7 +2,11 @@
 
 A six-degree-of-freedom (6DOF) Tadpole flight-control mod for **Subnautica 2 stable branch**, using a Windows controls/configuration helper and UE4SS Lua gameplay scripts.
 
-**Status: PRIVATE RELEASE CANDIDATE; NOT APPROVED FOR PUBLIC DISTRIBUTION.** The existing flight handling, controller mapping, GUI and profile behavior were human-tested on the preceding test build. The newly packaged release candidate must still pass a fresh-install smoke test.
+**Status: PRIVATE RELEASE CANDIDATE; NOT APPROVED FOR PUBLIC DISTRIBUTION.** The earlier release candidate was human-tested, and the subsequent Lua-error-logging candidate passed automated CI and a clean TurboTad reinstall/manual acceptance covering the GUI, profiles, boost, WAV playback, and flight. Public release remains pending explicit owner approval.
+
+## How it was made
+
+**Developed with AI under human direction.** ChatGPT and DeepSeek were major contributors to code and technical research; Claude, ChatGPT, and other tools assisted with audits and reviews. The creator directed the project and personally tested and accepted its flight controls and GUI. See [HOW-IT-WAS-MADE.md](HOW-IT-WAS-MADE.md) for an open account of who did what, what was tested, and the limits of that testing.
 
 ## Features
 
@@ -38,7 +42,7 @@ On a new install, `mapping.xml`, saved profiles, runtime `input.txt` and `boost-
 - Directional boost, cooldown, HUD, custom WAV selection/test, and no recurring one-second stutter.
 - Stop/exit restores ordinary controls; restore your original setup if any check fails.
 
-This list is a **test plan**, not a claim the final ZIP has passed all checks.
+This is a recommended user verification checklist. The 2026-11-22 human acceptance covered core GUI, profiles, boost, WAV behavior, and flight, but not every combination of device, game build, or other mod.
 
 ## Rollback
 
