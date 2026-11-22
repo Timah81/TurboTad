@@ -193,6 +193,32 @@ internal static class UiSelfTest
                 if (mph.Value < 89M || mph.Value > 90M) throw new Exception("mph display not linked to saved percent");
                 mph.Value = 22.4M;
                 if (savedSpeed.Value != 100M) throw new Exception("mph input not linked back to speed percent");
+
+                // Regression for the user-observed clipping at the bottom of Input Mapping.
+                tabs.SelectedIndex = 1;
+                TabPage mappingPage = tabs.TabPages[1];
+                IntPtr inputHandle = mappingPage.Handle;
+                mappingPage.PerformLayout();
+                CheckBox flightOptIn = (CheckBox)Field(formType, form, "includeFlightTuningInProfile");
+                if (flightOptIn.Parent != mappingPage || flightOptIn.Checked ||
+                    flightOptIn.Text != "Include flight tuning")
+                    throw new Exception("Optional flight tuning checkbox is missing or not default-off");
+                if (flightOptIn.Bottom > mappingPage.ClientSize.Height - 8 ||
+                    flightOptIn.Right > mappingPage.ClientSize.Width - 8)
+                    throw new Exception("Flight tuning checkbox clipped by Input Mapping tab: bottom " +
+                        flightOptIn.Bottom + ", viewport " + mappingPage.ClientSize.Height);
+                Button saveProfile = null;
+                foreach (Control c in mappingPage.Controls)
+                {
+                    Button button = c as Button;
+                    if (button == null) continue;
+                    if (button.Text == "TEST XBOX INPUT")
+                        throw new Exception("Obsolete Xbox diagnostic button remains visible");
+                    if (button.Text == "SAVE PROFILE") saveProfile = button;
+                }
+                if (saveProfile == null || flightOptIn.Top > saveProfile.Bottom ||
+                    flightOptIn.Bottom < saveProfile.Top || flightOptIn.Left <= saveProfile.Right)
+                    throw new Exception("Flight tuning checkbox not beside Save Profile");
                 form.Close();
             }
             Console.WriteLine("GUI test passed: obsolete subtitles removed, speed layout, WAV picker, numeric entry and speed synchronization.");
