@@ -383,14 +383,14 @@ namespace TurboTad
             string[] movementNames = { "Forward / reverse", "Strafe left / right", "Vertical up / down" };
             for (int i = 0; i < 3; ++i)
             {
-                rotationRates[i] = MakeNumber(rotations, 392, 82 + i * 82, 90, 28, 10M, 1000M, 100M, 10M);
+                rotationRates[i] = MakeNumber(rotations, 392, 82 + i * 82, 90, 28, 10M, 1000M, 100M, 1M);
                 RateSlider slider = new RateSlider(10, 1000, 1, 100);
                 slider.SetBounds(19, 112 + i * 82, 461, 30);
                 rotations.Controls.Add(slider);
                 UiLabel(rotations, rateNames[i] + " rate (%)", 20, 82 + i * 82, 365, 27, 10F, Color.WhiteSmoke);
                 BindSlider(slider, rotationRates[i]);
 
-                movementRates[i] = MakeNumber(movements, 392, 82 + i * 82, 90, 28, 10M, 1000M, 100M, 10M);
+                movementRates[i] = MakeNumber(movements, 392, 82 + i * 82, 90, 28, 10M, 1000M, 100M, 1M);
                 RateSlider movement = new RateSlider(10, 1000, 1, 100);
                 movement.SetBounds(19, 112 + i * 82, 461, 30);
                 movements.Controls.Add(movement);
