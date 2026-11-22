@@ -194,18 +194,79 @@ namespace TurboTad
                 SelectAnalogSource(row,InputSource.Joystick(id+":"+mid+":"+pid+":"+item.GetAttribute("name"),axis,true),item.GetAttribute("invert")=="1");
             }
         }
+
+        private void ShowActiveInputProfile()
+        {
+            if (activeProfileLabel == null) return;
+            activeProfileLabel.Text = activeInputProfilePath == null
+                ? "Active input profile: none"
+                : "Active input profile: " + Path.GetFileName(activeInputProfilePath);
+            activeProfileLabel.AutoEllipsis = true;
+        }
+
+        // Save the current input bindings to the selected profile, replacing that file.
+        // A temp write + replace prevents a failed save from leaving a truncated profile.
+        private void SaveInputProfileTo(string destination)
+        {
+            XmlDocument doc = new XmlDocument();
+            XmlElement top = doc.CreateElement("TurboTadInputProfile");
+            doc.AppendChild(top);
+            top.AppendChild(WriteUniversalBindings(doc));
+            string temp = Path.Combine(Path.GetDirectoryName(destination),
+                "." + Path.GetFileName(destination) + "." + Guid.NewGuid().ToString("N") + ".tmp");
+            try
+            {
+                doc.Save(temp);
+                if (File.Exists(destination)) File.Replace(temp, destination, null);
+                else File.Move(temp, destination);
+            }
+            finally
+            {
+                if (File.Exists(temp)) File.Delete(temp);
+            }
+        }
+
         private void ExportInputProfile()
         {
-            StopControls(); learning=-1;
-            using(SaveFileDialog dialog=new SaveFileDialog { Filter="TurboTad input profile (*.xml)|*.xml", FileName="TurboTad-input-profile.xml",OverwritePrompt=true })
-                if(dialog.ShowDialog(this)==DialogResult.OK)
-                    try
-                    {
-                        XmlDocument doc=new XmlDocument();XmlElement top=doc.CreateElement("TurboTadInputProfile");doc.AppendChild(top);
-                        top.AppendChild(WriteUniversalBindings(doc));doc.Save(dialog.FileName);prompt.Text="Input profile saved.";
-                    }
-                    catch(Exception e){prompt.Text="Profile save failed: "+e.Message;}
+            StopControls(); learning = -1;
+            if (String.IsNullOrEmpty(activeInputProfilePath))
+            {
+                ExportNewInputProfile();
+                return;
+            }
+            try
+            {
+                SaveInputProfileTo(activeInputProfilePath);
+                prompt.Text = "Updated input profile: " + Path.GetFileName(activeInputProfilePath);
+                ShowActiveInputProfile();
+            }
+            catch (Exception e) { prompt.Text = "Profile update failed: " + e.Message; }
         }
+
+        private void ExportNewInputProfile()
+        {
+            StopControls(); learning = -1;
+            using (SaveFileDialog dialog = new SaveFileDialog
+            {
+                Filter = "TurboTad input profile (*.xml)|*.xml",
+                FileName = "TurboTad-input-profile.xml",
+                OverwritePrompt = true
+            })
+            {
+                if (!String.IsNullOrEmpty(activeInputProfilePath))
+                    dialog.InitialDirectory = Path.GetDirectoryName(activeInputProfilePath);
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                try
+                {
+                    SaveInputProfileTo(dialog.FileName);
+                    activeInputProfilePath = dialog.FileName;
+                    ShowActiveInputProfile();
+                    prompt.Text = "Input profile saved: " + Path.GetFileName(dialog.FileName);
+                }
+                catch (Exception e) { prompt.Text = "Profile save failed: " + e.Message; }
+            }
+        }
+
         private void ImportInputProfile()
         {
             StopControls(); learning=-1;
@@ -218,7 +279,9 @@ namespace TurboTad
                         using(XmlReader reader=XmlReader.Create(dialog.FileName,settings))doc.Load(reader);
                         if(doc.DocumentElement.Name!="TurboTadInputProfile"||doc.DocumentElement["UniversalInput"]==null)throw new FormatException("Not a TurboTad input profile");
                         LoadUniversalBindings(doc.DocumentElement["UniversalInput"]);mappingLoadError=null;SaveMapping();
-                        prompt.Text="Input profile loaded. Center controls, then Start.";
+                        activeInputProfilePath = dialog.FileName;
+                        ShowActiveInputProfile();
+                        prompt.Text="Input profile loaded: "+Path.GetFileName(dialog.FileName)+". Center controls, then Start.";
                     }
                     catch(Exception e){prompt.Text="Profile not loaded: "+e.Message;}
         }
