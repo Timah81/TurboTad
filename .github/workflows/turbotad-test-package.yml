@@ -33,7 +33,7 @@ jobs:
           if (!(Test-Path $zip)) { throw 'ZIP was not created' }
           $files = [IO.Compression.ZipFile]::OpenRead($zip)
           try {
-            $names = @($files.Entries | ForEach-Object FullName)
+            $names = @($files.Entries | ForEach-Object { $_.FullName.Replace('\\','/') })
             foreach ($name in @('ue4ss/Mods/TurboTad/TurboTad.Controls.exe','ue4ss/Mods/TurboTad/Scripts/controller.lua','ue4ss/Mods/TurboTad/Scripts/config.lua','ue4ss/Mods/TurboTad/enabled.txt')) {
               if ($names -notcontains $name) { throw ('Missing ZIP entry: ' + $name) }
             }
