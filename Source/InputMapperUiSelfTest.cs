@@ -254,6 +254,73 @@ internal static class InputMapperUiSelfTest
                     throw new Exception("Paired trigger selection did not survive save");
                 f.Close();
             }
+            // Optional flight-tuning profiles: legacy input-only save, opt-in roundtrip,
+            // overwrite selected profile, invalid-tuning rejection, and opt-out removal.
+            using (Form f = (Form)Activator.CreateInstance(t, new object[]{root}))
+            {
+                CheckBox optIn = (CheckBox)t.GetField("includeFlightTuningInProfile", Flags).GetValue(f);
+                NumericUpDown speed = (NumericUpDown)t.GetField("topSpeed", Flags).GetValue(f);
+                NumericUpDown[] rotation = (NumericUpDown[])t.GetField("rotationRates", Flags).GetValue(f);
+                NumericUpDown[] movement = (NumericUpDown[])t.GetField("movementRates", Flags).GetValue(f);
+                string profilePath = Path.Combine(root, "optional-flight-profile.xml");
+                speed.Value = 171;
+                rotation[0].Value = 700; rotation[1].Value = 893; rotation[2].Value = 271;
+                movement[0].Value = 300; movement[1].Value = 415; movement[2].Value = 146;
+                if (optIn.Checked) throw new Exception("Flight tuning inclusion must default to off");
+                Call(t, f, "SaveInputProfileTo", profilePath);
+                XmlDocument saved = new XmlDocument(); saved.Load(profilePath);
+                if (saved.DocumentElement["UniversalInput"] == null ||
+                    saved.DocumentElement["FlightTuning"] != null)
+                    throw new Exception("Input-only profile format changed");
+                optIn.Checked = true;
+                Call(t, f, "SaveInputProfileTo", profilePath);
+                saved.Load(profilePath);
+                XmlElement flight = saved.DocumentElement["FlightTuning"];
+                if (flight == null || flight.GetAttribute("version") != "1" ||
+                    flight.GetAttribute("topSpeed") != "171" ||
+                    flight.GetAttribute("yawRate") != "893" ||
+                    flight.GetAttribute("strafeRate") != "415")
+                    throw new Exception("Opt-in flight tuning did not roundtrip in XML");
+                speed.Value = 100;
+                rotation[0].Value = 100; rotation[1].Value = 100; rotation[2].Value = 100;
+                movement[0].Value = 100; movement[1].Value = 100; movement[2].Value = 100;
+                decimal[] values = (decimal[])Call(t, f, "ReadProfileFlightTuning", flight);
+                Call(t, f, "ApplyProfileFlightTuning", (object)values);
+                if (speed.Value != 171 || rotation[0].Value != 700 ||
+                    rotation[1].Value != 893 || rotation[2].Value != 271 ||
+                    movement[0].Value != 300 || movement[1].Value != 415 ||
+                    movement[2].Value != 146)
+                    throw new Exception("Opt-in flight tuning did not restore GUI values");
+                XmlDocument invalidProfile = new XmlDocument();
+                invalidProfile.LoadXml(saved.OuterXml);
+                invalidProfile.DocumentElement["FlightTuning"].SetAttribute("topSpeed", "401");
+                bool invalidFlightRejected = false;
+                try { Call(t, f, "ReadProfileFlightTuning", invalidProfile.DocumentElement["FlightTuning"]); }
+                catch (TargetInvocationException e)
+                {
+                    if (e.InnerException is FormatException) invalidFlightRejected = true;
+                    else throw;
+                }
+                if (!invalidFlightRejected || speed.Value != 171)
+                    throw new Exception("Out-of-range flight tuning was accepted or changed the GUI");
+                decimal[] absent = (decimal[])Call(t, f, "ReadProfileFlightTuning", new object[]{null});
+                if (absent != null || speed.Value != 171)
+                    throw new Exception("Legacy profile must retain current flight settings");
+                t.GetField("activeInputProfilePath", Flags).SetValue(f, profilePath);
+                speed.Value = 200;
+                Call(t, f, "ExportInputProfile");
+                saved.Load(profilePath);
+                if (saved.DocumentElement["FlightTuning"].GetAttribute("topSpeed") != "200")
+                    throw new Exception("Save Profile did not update the loaded profile");
+                optIn.Checked = false;
+                Call(t, f, "SaveInputProfileTo", profilePath);
+                saved.Load(profilePath);
+                if (saved.DocumentElement["FlightTuning"] != null)
+                    throw new Exception("Opt-out did not remove flight tuning from saved profile");
+                if (Directory.GetFiles(root, ".*.tmp").Length != 0)
+                    throw new Exception("Profile save leaked a temporary file");
+                f.Close();
+            }
             string invalid = "<TurboTad><UniversalInput version='99'/></TurboTad>";
             File.WriteAllText(mapping,invalid);
             using(Form f = (Form)Activator.CreateInstance(t,new object[]{root}))
