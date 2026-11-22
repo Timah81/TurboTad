@@ -208,7 +208,7 @@ namespace TurboTad
         private readonly NumericUpDown[] movementRates = new NumericUpDown[3];
         private readonly PictureBox brandMark = new PictureBox();
         private System.Drawing.Icon applicationIcon;
-        private decimal hudRight = 420M, hudBottom = 48M;
+        private decimal hudRight = 400M, hudBottom = 50M;
         private readonly NumericUpDown boostCooldown = new DeferredNumericUpDown();
         private readonly NumericUpDown topSpeed = new DeferredNumericUpDown();
         private readonly ComboBox boostChoice = new ComboBox();
@@ -1121,7 +1121,7 @@ namespace TurboTad
                 bottom.ValueChanged += delegate { hudBottom = bottom.Value; };
                 dialog.Controls.Add(right); dialog.Controls.Add(bottom);
                 Button reset = new Button(); reset.Text = "Reset position"; reset.SetBounds(18, 158, 155, 34);
-                reset.Click += delegate { right.Value = 420; bottom.Value = 48; };
+                reset.Click += delegate { right.Value = 400; bottom.Value = 50; };
                 Button done = new Button(); done.Text = "Done"; done.SetBounds(290, 158, 140, 34);
                 done.DialogResult = DialogResult.OK; dialog.AcceptButton = done; dialog.CancelButton = done;
                 dialog.Controls.Add(reset); dialog.Controls.Add(done);
