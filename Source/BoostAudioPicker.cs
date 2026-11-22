@@ -193,9 +193,10 @@ namespace TurboTad
                 if (info.Length == 0 || info.Length > MaxWavBytes)
                     throw new InvalidDataException("The WAV must be between 1 byte and 20 MB.");
                 byte[] input = File.ReadAllBytes(path);
-                PcmWav.Process(input, 100);
-                // Reject unsupported WAV encodings before changing the selected file.
-                using (MemoryStream checkStream = new MemoryStream(input, false))
+                // Validate the normalized playback bytes, not the source header:
+                // SoundPlayer cannot decode every WAV encoding we import.
+                byte[] playback = PcmWav.Process(input, 100);
+                using (MemoryStream checkStream = new MemoryStream(playback, false))
                 using (SoundPlayer checkPlayer = new SoundPlayer(checkStream)) checkPlayer.Load();
                 StopPreview();
                 originalWav = input;
