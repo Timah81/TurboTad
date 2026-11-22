@@ -204,7 +204,65 @@ namespace TurboTad
             activeProfileLabel.AutoEllipsis = true;
         }
 
-        // Save the current input bindings to the selected profile, replacing that file.
+        // FlightTuning is an optional extension. Legacy input-only profiles remain valid.
+        private XmlElement WriteProfileFlightTuning(XmlDocument doc)
+        {
+            XmlElement tuning = doc.CreateElement("FlightTuning");
+            tuning.SetAttribute("version", "1");
+            tuning.SetAttribute("topSpeed", topSpeed.Value.ToString(CultureInfo.InvariantCulture));
+            string[] rotationKeys = { "pitchRate", "yawRate", "rollRate" };
+            string[] movementKeys = { "forwardRate", "strafeRate", "verticalRate" };
+            for (int i = 0; i < 3; i++)
+            {
+                tuning.SetAttribute(rotationKeys[i], rotationRates[i].Value.ToString(CultureInfo.InvariantCulture));
+                tuning.SetAttribute(movementKeys[i], movementRates[i].Value.ToString(CultureInfo.InvariantCulture));
+            }
+            return tuning;
+        }
+
+        private static decimal ReadTuningValue(XmlElement tuning, string name, decimal minimum, decimal maximum)
+        {
+            decimal value;
+            if (!Decimal.TryParse(tuning.GetAttribute(name), NumberStyles.Number,
+                CultureInfo.InvariantCulture, out value) ||
+                value < minimum || value > maximum || Decimal.Truncate(value) != value)
+                throw new FormatException("Invalid profile flight tuning: " + name);
+            return value;
+        }
+
+        // Parse/validate every value before changing any current GUI settings.
+        // Order: top speed; pitch, yaw, roll; forward, strafe, vertical.
+        private decimal[] ReadProfileFlightTuning(XmlElement tuning)
+        {
+            if (tuning == null) return null;
+            if (tuning.GetAttribute("version") != "1")
+                throw new FormatException("Unsupported flight tuning profile version");
+            decimal[] values = new decimal[7];
+            values[0] = ReadTuningValue(tuning, "topSpeed", topSpeed.Minimum, topSpeed.Maximum);
+            string[] rotationKeys = { "pitchRate", "yawRate", "rollRate" };
+            string[] movementKeys = { "forwardRate", "strafeRate", "verticalRate" };
+            for (int i = 0; i < 3; i++)
+            {
+                values[i + 1] = ReadTuningValue(tuning, rotationKeys[i],
+                    rotationRates[i].Minimum, rotationRates[i].Maximum);
+                values[i + 4] = ReadTuningValue(tuning, movementKeys[i],
+                    movementRates[i].Minimum, movementRates[i].Maximum);
+            }
+            return values;
+        }
+
+        private void ApplyProfileFlightTuning(decimal[] values)
+        {
+            if (values == null) return; // Input-only profile: retain existing flight tuning.
+            topSpeed.Value = values[0];
+            for (int i = 0; i < 3; i++)
+            {
+                rotationRates[i].Value = values[i + 1];
+                movementRates[i].Value = values[i + 4];
+            }
+        }
+
+        // Save input bindings and, only if opted in, flight tuning to the selected profile.
         // A temp write + replace prevents a failed save from leaving a truncated profile.
         private void SaveInputProfileTo(string destination)
         {
@@ -212,6 +270,8 @@ namespace TurboTad
             XmlElement top = doc.CreateElement("TurboTadInputProfile");
             doc.AppendChild(top);
             top.AppendChild(WriteUniversalBindings(doc));
+            if (includeFlightTuningInProfile.Checked)
+                top.AppendChild(WriteProfileFlightTuning(doc));
             string temp = Path.Combine(Path.GetDirectoryName(destination),
                 "." + Path.GetFileName(destination) + "." + Guid.NewGuid().ToString("N") + ".tmp");
             try
@@ -278,7 +338,12 @@ namespace TurboTad
                         XmlDocument doc=new XmlDocument();doc.XmlResolver=null;
                         using(XmlReader reader=XmlReader.Create(dialog.FileName,settings))doc.Load(reader);
                         if(doc.DocumentElement.Name!="TurboTadInputProfile"||doc.DocumentElement["UniversalInput"]==null)throw new FormatException("Not a TurboTad input profile");
-                        LoadUniversalBindings(doc.DocumentElement["UniversalInput"]);mappingLoadError=null;SaveMapping();
+                        // Invalid optional tuning must not change bindings or tuning.
+                        decimal[] loadedFlightTuning = ReadProfileFlightTuning(doc.DocumentElement["FlightTuning"]);
+                        LoadUniversalBindings(doc.DocumentElement["UniversalInput"]);
+                        ApplyProfileFlightTuning(loadedFlightTuning);
+                        includeFlightTuningInProfile.Checked = loadedFlightTuning != null;
+                        mappingLoadError=null;SaveMapping();
                         activeInputProfilePath = dialog.FileName;
                         ShowActiveInputProfile();
                         prompt.Text="Input profile loaded: "+Path.GetFileName(dialog.FileName)+". Center controls, then Start.";
