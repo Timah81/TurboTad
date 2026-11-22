@@ -37,8 +37,8 @@ internal static class UiSelfTest
     }
 
     // All visible numeric editors must permit intermediate typing without
-    // validation on every live .Value read. Internal hidden percent backing
-    // controls (e.g. topSpeed) are intentionally not part of this scan.
+    // validation on every live .Value read. Top-speed percent is now a
+    // visible editor alongside estimated mph and must be counted too.
     private static int AssertDeferredEditors(Control parent)
     {
         int count = 0;
@@ -129,8 +129,8 @@ internal static class UiSelfTest
                 NumericUpDown savedSpeed = (NumericUpDown)Field(formType, form, "topSpeed");
                 NumericUpDown mph = (NumericUpDown)Field(formType, form, "mphInput");
                 int deferredEditors = AssertDeferredEditors(form);
-                if (deferredEditors != 9)
-                    throw new Exception("Expected 9 visible delayed-commit editors, got " + deferredEditors);
+                if (deferredEditors != 10)
+                    throw new Exception("Expected 10 visible delayed-commit editors, got " + deferredEditors);
                 if (rotation[0].Minimum != 10 || movement[0].Minimum != 10 || mph.Minimum <= 0)
                     throw new Exception("A real numeric range was changed just to permit typing");
                 // Cosmetic cleanup: no stale explanatory subheadings, even on other tabs.
@@ -156,6 +156,10 @@ internal static class UiSelfTest
                 if (mph.Height < 20 || mph.Width < 90)
                     throw new Exception("Speed editor dimensions are unexpectedly small");
                 Control speedCard = mph.Parent;
+                if (savedSpeed.Parent != speedCard || !savedSpeed.Visible || savedSpeed.Increment != 1)
+                    throw new Exception("Editable 1% top-speed percentage box not visible beside mph");
+                if (savedSpeed.Right > mph.Left || savedSpeed.Top != mph.Top)
+                    throw new Exception("Top-speed percentage overlaps mph or is not aligned");
                 Control speedSlider = null;
                 foreach (Control control in speedCard.Controls)
                     if (control.GetType().Name == "RateSlider") { speedSlider = control; break; }
