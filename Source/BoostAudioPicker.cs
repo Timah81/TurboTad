@@ -307,11 +307,17 @@ namespace TurboTad
         }
     }
 
-    // Edits only uncompressed integer PCM WAV payloads. SoundPlayer has no per-
-    // playback volume API; scaling a private copy of the WAV is independent of
-    // the Windows system volume and keeps the established trigger unchanged.
+    // Accept ordinary integer-PCM WAV and the common WAVE_FORMAT_EXTENSIBLE
+    // wrapper used by 24-bit audio editors. Convert PCM24/32 to standard PCM16
+    // for SoundPlayer; keep original bytes separately for future volume edits.
+    // Does not decode compressed, floating-point, or non-PCM subtypes.
     internal static class PcmWav
     {
+        private static readonly byte[] PcmSubtype = {
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00,
+            0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71
+        };
+
         internal static byte[] Process(byte[] input, int volume)
         {
             if (input == null || input.Length < 44 || input.Length > 20 * 1024 * 1024)
@@ -320,10 +326,13 @@ namespace TurboTad
             if (Encoding.ASCII.GetString(input, 0, 4) != "RIFF" ||
                 Encoding.ASCII.GetString(input, 8, 4) != "WAVE")
                 throw new InvalidDataException("The file must be a standard RIFF/WAVE file.");
+
             long riffLength = (long)BitConverter.ToUInt32(input, 4) + 8;
             if (riffLength > input.Length || riffLength < 44)
                 throw new InvalidDataException("The RIFF/WAVE size is invalid.");
-            int format = -1, channels = 0, bits = 0, frameBytes = 0, dataStart = -1, dataLength = 0;
+
+            int format = -1, channels = 0, bits = 0, frameBytes = 0, rate = 0;
+            int dataStart = -1, dataLength = 0;
             int pos = 12;
             while (pos + 8 <= riffLength)
             {
@@ -335,13 +344,26 @@ namespace TurboTad
                 {
                     format = BitConverter.ToUInt16(input, pos + 8);
                     channels = BitConverter.ToUInt16(input, pos + 10);
-                    bits = BitConverter.ToUInt16(input, pos + 22);
+                    rate = BitConverter.ToInt32(input, pos + 12);
                     frameBytes = BitConverter.ToUInt16(input, pos + 20);
-                    int sampleRate = BitConverter.ToInt32(input, pos + 12);
-                    if (format != 1 || channels < 1 || channels > 8 ||
+                    bits = BitConverter.ToUInt16(input, pos + 22);
+                    if (format == 0xFFFE)
+                    {
+                        if (size < 40 || BitConverter.ToUInt16(input, pos + 24) < 22)
+                            throw new InvalidDataException("The extensible PCM WAV header is incomplete.");
+                        int validBits = BitConverter.ToUInt16(input, pos + 26);
+                        if (validBits > bits)
+                            throw new InvalidDataException("The extensible PCM WAV bit depth is invalid.");
+                        for (int i = 0; i < PcmSubtype.Length; i++)
+                            if (input[pos + 32 + i] != PcmSubtype[i])
+                                throw new InvalidDataException("This WAV uses a compressed or floating-point encoding. Export as PCM 16-bit.");
+                    }
+                    else if (format != 1)
+                        throw new InvalidDataException("This WAV uses a compressed or floating-point encoding. Export as PCM 16-bit.");
+                    if (channels < 1 || channels > 2 ||
                         (bits != 8 && bits != 16 && bits != 24 && bits != 32) ||
-                        frameBytes != channels * (bits / 8) || sampleRate < 8000 || sampleRate > 192000)
-                        throw new InvalidDataException("Use an uncompressed PCM WAV (8/16/24/32-bit, 8-192 kHz). Re-export compressed or floating-point WAV files as PCM 16-bit.");
+                        frameBytes != channels * (bits / 8) || rate < 8000 || rate > 192000)
+                        throw new InvalidDataException("Use uncompressed PCM WAV (mono/stereo; 8/16/24/32-bit; 8-192 kHz).");
                 }
                 else if (name == "data" && dataStart < 0)
                 {
@@ -350,46 +372,79 @@ namespace TurboTad
                 }
                 pos = (int)(end + (size & 1L));
             }
-            if (format != 1 || dataStart < 0 || dataLength == 0 || frameBytes == 0 ||
-                dataLength % frameBytes != 0)
+            if ((format != 1 && format != 0xFFFE) || dataStart < 0 || dataLength == 0 ||
+                frameBytes == 0 || dataLength % frameBytes != 0)
                 throw new InvalidDataException("The WAV is missing valid PCM audio data.");
-            byte[] output = (byte[])input.Clone();
-            if (volume == 100) return output;
-            double gain = volume / 100.0;
-            int step = bits / 8;
-            for (int offset = dataStart; offset < dataStart + dataLength; offset += step)
+
+            // Classic 8/16-bit PCM has worked in previous releases; retain its
+            // complete RIFF structure and byte-for-byte identity at 100%.
+            bool canonical = format != 1 || bits > 16;
+            if (!canonical)
             {
-                if (bits == 8)
+                byte[] output = (byte[])input.Clone();
+                if (volume == 100) return output;
+                double gain = volume / 100.0;
+                int step = bits / 8;
+                for (int offset = dataStart; offset < dataStart + dataLength; offset += step)
                 {
-                    double sample = 128 + (input[offset] - 128) * gain;
-                    output[offset] = (byte)Math.Max(0, Math.Min(255, Math.Round(sample)));
+                    if (bits == 8)
+                        output[offset] = (byte)Math.Max(0, Math.Min(255,
+                            Math.Round(128 + (input[offset] - 128) * gain)));
+                    else
+                    {
+                        short sample = BitConverter.ToInt16(input, offset);
+                        short scaled = (short)Math.Max(short.MinValue,
+                            Math.Min(short.MaxValue, Math.Round(sample * gain)));
+                        byte[] bytes = BitConverter.GetBytes(scaled);
+                        output[offset] = bytes[0];
+                        output[offset + 1] = bytes[1];
+                    }
                 }
-                else if (bits == 16)
-                {
-                    double sample = BitConverter.ToInt16(input, offset) * gain;
-                    short scaled = (short)Math.Max(short.MinValue, Math.Min(short.MaxValue, Math.Round(sample)));
-                    byte[] b = BitConverter.GetBytes(scaled);
-                    output[offset] = b[0]; output[offset + 1] = b[1];
-                }
-                else if (bits == 24)
-                {
-                    int sample = input[offset] | (input[offset + 1] << 8) | (input[offset + 2] << 16);
-                    if ((sample & 0x800000) != 0) sample |= unchecked((int)0xFF000000);
-                    double scaledValue = Math.Max(-8388608.0, Math.Min(8388607.0, Math.Round(sample * gain)));
-                    int scaled = (int)scaledValue;
-                    output[offset] = (byte)(scaled & 255);
-                    output[offset + 1] = (byte)((scaled >> 8) & 255);
-                    output[offset + 2] = (byte)((scaled >> 16) & 255);
-                }
-                else
-                {
-                    double sample = BitConverter.ToInt32(input, offset) * gain;
-                    int scaled = (int)Math.Max(int.MinValue, Math.Min(int.MaxValue, Math.Round(sample)));
-                    byte[] b = BitConverter.GetBytes(scaled);
-                    Buffer.BlockCopy(b, 0, output, offset, 4);
-                }
+                return output;
             }
-            return output;
+
+            // A small plain-PCM RIFF header is compatible with SoundPlayer.
+            // Integer PCM24/32 is reduced to 16-bit for reliable Windows playback.
+            int outputBits = bits > 16 ? 16 : bits;
+            int outputStep = outputBits / 8;
+            int inputStep = bits / 8;
+            int samples = dataLength / inputStep;
+            int outputBytes = checked(samples * outputStep);
+            using (MemoryStream stream = new MemoryStream(checked(44 + outputBytes)))
+            using (BinaryWriter writer = new BinaryWriter(stream, Encoding.ASCII))
+            {
+                writer.Write(Encoding.ASCII.GetBytes("RIFF"));
+                writer.Write((uint)(36 + outputBytes));
+                writer.Write(Encoding.ASCII.GetBytes("WAVEfmt "));
+                writer.Write(16U);
+                writer.Write((ushort)1);
+                writer.Write((ushort)channels);
+                writer.Write((uint)rate);
+                writer.Write((uint)(rate * channels * outputStep));
+                writer.Write((ushort)(channels * outputStep));
+                writer.Write((ushort)outputBits);
+                writer.Write(Encoding.ASCII.GetBytes("data"));
+                writer.Write((uint)outputBytes);
+                double gain = volume / 100.0;
+                for (int offset = dataStart; offset < dataStart + dataLength; offset += inputStep)
+                {
+                    if (bits == 8)
+                        writer.Write((byte)Math.Max(0, Math.Min(255,
+                            Math.Round(128 + (input[offset] - 128) * gain))));
+                    else
+                    {
+                        int sample = bits == 16 ? BitConverter.ToInt16(input, offset) :
+                            bits == 24 ? input[offset] | (input[offset + 1] << 8) |
+                                (input[offset + 2] << 16) : BitConverter.ToInt32(input, offset);
+                        if (bits == 24 && (sample & 0x800000) != 0)
+                            sample |= unchecked((int)0xFF000000);
+                        double pcm16 = sample * gain / (bits == 32 ? 65536.0 : bits == 24 ? 256.0 : 1.0);
+                        writer.Write((short)Math.Max(short.MinValue, Math.Min(short.MaxValue, Math.Round(pcm16))));
+                    }
+                }
+                writer.Flush();
+                return stream.ToArray();
+            }
         }
     }
 }
