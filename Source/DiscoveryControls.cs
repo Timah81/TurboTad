@@ -77,6 +77,11 @@ namespace TurboTad
                 }
             }
 
+            // WinForms drops ComboBox.SelectedItem if the selected object is
+            // temporarily removed while prioritizing discovered buttons.
+            // Preserve it across reorder so Save Profile doesn't serialize
+            // an unintended unassigned Boost source.
+            ButtonChoice selectedBoost = boostChoice.SelectedItem as ButtonChoice;
             int buttonInsertAt = 1;
             foreach (InputSource source in discovered.OfType(false))
             {
@@ -95,6 +100,8 @@ namespace TurboTad
                 boostChoice.Items.Remove(match);
                 boostChoice.Items.Insert(buttonInsertAt++, match);
             }
+            if (selectedBoost != null && boostChoice.Items.Contains(selectedBoost))
+                boostChoice.SelectedItem = selectedBoost;
         }
     }
 }
