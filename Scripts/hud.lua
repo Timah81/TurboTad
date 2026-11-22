@@ -154,7 +154,7 @@ function M.new(env)
         end
     end
     local function position(state)
-        local right,bottom=state.right or 420,state.bottom or 48
+        local right,bottom=state.right or 400,state.bottom or 50
         if self.lastRight==right and self.lastBottom==bottom then return end
         if self.isCanvas then self.slot:SetPosition({X=-right,Y=-bottom})
         else self.slot:SetPadding({Left=0,Top=0,Right=right,Bottom=bottom}) end
