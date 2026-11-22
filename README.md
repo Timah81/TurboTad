@@ -1,44 +1,57 @@
-# TurboTad
+# TurboTad — v0.4.0-rc.1 (release candidate)
 
-A six-degree-of-freedom (6DOF) Tadpole flight-control mod for **Subnautica 2** (stable branch), developed for Windows. The project pairs a C# Windows controls/configuration helper with UE4SS Lua gameplay scripts.
+A six-degree-of-freedom (6DOF) Tadpole flight-control mod for **Subnautica 2 stable branch**, using a Windows controls/configuration helper and UE4SS Lua gameplay scripts.
 
-> **Status: private pre-release staging.** The source baseline and first-time installation procedure are being prepared. The repository is not yet a certified public release or a complete ready-to-install mod.
+**Status: PRIVATE RELEASE CANDIDATE; NOT APPROVED FOR PUBLIC DISTRIBUTION.** The existing flight handling, controller mapping, GUI and profile behavior were human-tested on the preceding test build. The newly packaged release candidate must still pass a fresh-install smoke test.
 
-## What it does
+## Features
 
-- Independent pitch, yaw, roll, forward/reverse, lateral and vertical movement, including inverted flight
-- Adjustable response and rotational rates, plus a normal top-speed setting
-- Directional boost with cooldown and HUD feedback
-- A Windows controls GUI for configuring the currently supported joystick setup
-- Optional local, user-selected WAV playback for boost sound
+- Independent pitch, yaw, roll, forward/reverse, strafe, and vertical movement, including inverted flight.
+- Adjustable rotational and translational response, live top-speed control, and dynamically scaled swim acceleration.
+- Directional boost, HUD feedback and optional local WAV sound playback.
+- Windows GUI with VKB/WinMM and Xbox/XInput mapping, mixed analog/button control inputs, and saved controller profiles.
+- Optional **Include flight tuning** setting when saving profiles; unchecked profiles save input bindings only.
 
-This feature branch contains **Universal Input Mapper stage 1 — a test candidate**. Each flight axis can use a WinMM analog axis or two keyboard/WinMM button directions, with mixed devices, separate boost binding and input-only profiles. Existing joystick mappings and the accepted v7 numeric editors are retained. XInput-specific trigger pairs and relative mouse input remain later stages; this candidate has not passed Windows hardware or in-game acceptance.
+## Prerequisites
 
-To test against an existing working installation, close the game/helper and run `InstallUniversalMapper.cmd`. It compiles and runs isolated tests before replacing the helper and backs up the existing executable and mapping. `RollbackUniversalMapper.cmd` restores that pre-install pair and preserves newer bindings in a separate checkpoint.
+1. A legitimate installation of **Subnautica 2 (stable branch)** on Windows.
+2. **UE4SS**, installed separately and compatible with that game build. Development used UE4SS v3.0.1 Beta (build d7e7826d); other versions have not been certified for this candidate.
+3. Windows with the **.NET Framework 4.x runtime** for `TurboTad.Controls.exe`. The Windows build tooling uses the .NET Framework 4.x x64 C# compiler.
 
-## Architecture
+TurboTad does **not** bundle Subnautica 2, UE4SS, game DLLs, save data or Windows/.NET installers. No Steam Deck/Proton, multiplayer or future game-version compatibility guarantee is made.
 
-- `Source/`: C# Windows helper, GUI code and self-tests
-- `Scripts/`: UE4SS Lua modules
-- `Assets/`: icons and GUI images used by the helper
-- `BuildAndVerify.cmd` / `BuildAndVerify.ps1`: Windows source build and isolated self-tests
+## Installing the candidate
 
-UE4SS is a **separate dependency** and is not included in this source repository. Compatibility depends on the game and UE4SS versions; recorded development used the game's stable branch and UE4SS 3.0.1 Beta. These are observations, not a universal compatibility guarantee.
+1. Exit Subnautica 2 and the TurboTad companion. **Back up your saves and your existing** `Subnautica2/Binaries/Win64/ue4ss/Mods/TurboTad/` directory, including personal `mapping.xml`, profiles and WAV files.
+2. Install a compatible UE4SS separately, following its own instructions.
+3. Extract the complete TurboTad runtime ZIP **into** `Subnautica2/Binaries/Win64/`, so that the extracted mod is at `Subnautica2/Binaries/Win64/ue4ss/Mods/TurboTad/`. Do not add an extra `TurboTad` folder layer.
+4. Run `TurboTad.cmd` from `Binaries/Win64/`, or directly run `ue4ss/Mods/TurboTad/TurboTad.Controls.exe`. Configure your axes and button directions using the input mapper; click **START CONTROLS** and enter the Tadpole.
+5. Configure an optional WAV with the GUI's audio picker. **No WAV ships with this package**, so the helper must also function silently without one.
 
-## Safety warning
+On a new install, `mapping.xml`, saved profiles, runtime `input.txt` and `boost-status.txt` are created as needed; they are not included in the ZIP. Xbox inputs can appear once as XInput (`Xbox 1`) and again via a generic Windows joystick driver; select the Xbox-labeled source where practical. This duplicate display is not a confirmed flight-control failure.
 
-**High speed can launch the Tadpole out of the game world when breaching the water surface.** Excessive speed or boost can also cause collisions or an unrecoverable gameplay session. Back up game saves and test cautiously in open water. No automatic high-speed surface limiter is promised.
+## Smoke-test checklist
 
-## Building and verification
+- Clean launch with no WAV; all six axes, inverted control and ordinary analog fine control.
+- VKB and/or Xbox remapping, STOP/START, Alt-Tab, Tadpole exit/re-entry, game-focus recovery.
+- Two saved input profiles; check **Include flight tuning** and verify restored rates and top speed. Unchecked profiles should leave current flight tuning unchanged.
+- Directional boost, cooldown, HUD, custom WAV selection/test, and no recurring one-second stutter.
+- Stop/exit restores ordinary controls; restore your original setup if any check fails.
 
-Once the source files are imported, Windows users can run `BuildAndVerify.cmd` to compile the C# helper in a temporary directory and run isolated audio/GUI checks. These checks do **not** replace in-game regression testing or establish source-to-binary equivalence.
+This list is a **test plan**, not a claim the final ZIP has passed all checks.
 
-## Distribution and rights
+## Rollback
 
-The original project code/documentation is MIT-licensed; see `LICENSE`. Subnautica 2, UE4SS, Unreal Engine and other dependencies remain under their respective terms. Do not redistribute captured game audio, personal controller mappings, save data, or another project's binaries as part of TurboTad.
+Exit the game and helper. Restore the backup of `ue4ss/Mods/TurboTad/`. For a clean removal, delete only that mod folder and the optional `TurboTad.cmd` launcher from `Binaries/Win64/`; leave UE4SS and game files alone. Keep your personal controller profiles and WAVs outside the mod folder before removing it.
 
-This repository tracks source history. Runtime release archives should be created and validated separately.
+## Safety
 
-## TEST 1A acceptance — 2026-11-14
+**WARNING: This mod can break your game. Breaching the water surface at high speed can launch the Tadpole out of the map. Back up your saves and slow down before surfacing.**
 
-The user reports that TEST 1A fixed the reported Start/conflict problem. Extract the complete ZIP before running InstallUniversalMapper.cmd; launching it inside the archive can leave its companion PowerShell script unavailable. This acceptance covers the reported fix; broader hardware/gameplay regression and later adapters remain pending.
+Speed is not automatically limited near the surface. The displayed mph figure is an **estimate**, not measured speed telemetry.
+
+## Build, provenance and rights
+
+The exact source commit, compiler output hash, package manifest and full Windows self-test result should accompany each release-candidate build. `BuildAndVerify.ps1` runs isolated Windows build/self-tests but does **not** certify in-game behavior.
+
+Original TurboTad code is licensed under MIT; see `LICENSE` (also included in the runtime ZIP). Subnautica 2, Unreal Engine, UE4SS, Windows and .NET remain subject to their own terms. TurboTad's icon/logo redistribution rights should be confirmed before a public release. Do not bundle personal game audio, mappings, logs, probes or another project's executables.

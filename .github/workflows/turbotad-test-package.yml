@@ -1,48 +1,100 @@
-name: TurboTad test Windows package
+name: TurboTad Windows candidate package
 on:
   push:
     branches:
       - test/gui-numeric-step-one
+      - release/turbotad-v0.4.0-rc1
   workflow_dispatch:
+
 jobs:
   windows-build:
     runs-on: windows-latest
     permissions:
       contents: read
     steps:
-      - name: Check out tested source
+      - name: Check out exact source commit
         uses: actions/checkout@v4
-      - name: Compile and run existing self-tests
+      - name: Compile and run existing Windows self-tests
         shell: powershell
         run: |
           .\BuildAndVerify.ps1 -OutputDirectory "$env:RUNNER_TEMP\TurboTadVerified"
-      - name: Assemble minimal user-installable test ZIP
+      - name: Assemble and verify complete runtime ZIP
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.IO.Compression
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
           $root = Join-Path $env:RUNNER_TEMP 'TurboTadPackage'
           $mod = Join-Path $root 'ue4ss\Mods\TurboTad'
-          New-Item -ItemType Directory -Path (Join-Path $mod 'Scripts') -Force | Out-Null
-          New-Item -ItemType Directory -Path (Join-Path $mod 'Assets') -Force | Out-Null
+          $scripts = Join-Path $mod 'Scripts'
+          $assets = Join-Path $mod 'Assets'
+          New-Item -ItemType Directory -Path $scripts, $assets -Force | Out-Null
           Copy-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'TurboTadVerified\TurboTad.Controls.exe') -Destination $mod
-          Copy-Item -Path 'Scripts\*.lua' -Destination (Join-Path $mod 'Scripts')
-          Copy-Item -Path 'Assets\TurboTad.ico','Assets\TurboTadLogo.png' -Destination (Join-Path $mod 'Assets')
+          Copy-Item -Path 'Scripts\*.lua' -Destination $scripts
+          Copy-Item -LiteralPath 'Assets\TurboTad.ico','Assets\TurboTadLogo.png' -Destination $assets
+          Copy-Item -LiteralPath 'LICENSE' -Destination $mod
+          Copy-Item -LiteralPath 'TurboTad.cmd' -Destination $root
           New-Item -Path (Join-Path $mod 'enabled.txt') -ItemType File -Force | Out-Null
-          $zip = Join-Path $env:RUNNER_TEMP 'TurboTad_GUI_DynamicAccel_TEST.zip'
-          Compress-Archive -Path (Join-Path $root '*') -DestinationPath $zip -CompressionLevel Optimal
-          if (!(Test-Path $zip)) { throw 'ZIP was not created' }
-          $files = [IO.Compression.ZipFile]::OpenRead($zip)
+          $expected = @(
+            'TurboTad.cmd',
+            'ue4ss/Mods/TurboTad/TurboTad.Controls.exe',
+            'ue4ss/Mods/TurboTad/LICENSE',
+            'ue4ss/Mods/TurboTad/enabled.txt',
+            'ue4ss/Mods/TurboTad/Assets/TurboTad.ico',
+            'ue4ss/Mods/TurboTad/Assets/TurboTadLogo.png',
+            'ue4ss/Mods/TurboTad/Scripts/boost.lua',
+            'ue4ss/Mods/TurboTad/Scripts/config.lua',
+            'ue4ss/Mods/TurboTad/Scripts/controller.lua',
+            'ue4ss/Mods/TurboTad/Scripts/core.lua',
+            'ue4ss/Mods/TurboTad/Scripts/hud.lua',
+            'ue4ss/Mods/TurboTad/Scripts/main.lua',
+            'ue4ss/Mods/TurboTad/Scripts/velocity.lua'
+          )
+          $zip = Join-Path $env:RUNNER_TEMP 'TurboTad_0.4.0-rc.1_RELEASE_CANDIDATE.zip'
+          $sourceFiles = @(Get-ChildItem -LiteralPath $root -File -Recurse | Sort-Object FullName)
+          if ($sourceFiles.Count -ne $expected.Count) { throw ('Unexpected file count: ' + $sourceFiles.Count) }
+          $archive = [IO.Compression.ZipFile]::Open($zip, [IO.Compression.ZipArchiveMode]::Create)
           try {
-            $names = @($files.Entries | ForEach-Object { $_.FullName.Replace('\','/') })
-            foreach ($name in @('ue4ss/Mods/TurboTad/TurboTad.Controls.exe','ue4ss/Mods/TurboTad/Scripts/controller.lua','ue4ss/Mods/TurboTad/Scripts/config.lua','ue4ss/Mods/TurboTad/enabled.txt')) {
-              if ($names -notcontains $name) { throw ('Missing ZIP entry: ' + $name) }
+            foreach ($file in $sourceFiles) {
+              $relative = $file.FullName.Substring($root.Length + 1).Replace('\', '/')
+              if ($expected -notcontains $relative) { throw ('Unexpected source file: ' + $relative) }
+              [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $file.FullName, $relative, [IO.Compression.CompressionLevel]::Optimal)
             }
-          } finally { $files.Dispose() }
-          Write-Host ('Test ZIP ready: ' + $zip)
-      - name: Upload installable test package
+          } finally { $archive.Dispose() }
+          $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $names = @($archive.Entries | ForEach-Object { $_.FullName })
+            if ($names.Count -ne $expected.Count -or @($names | Select-Object -Unique).Count -ne $names.Count) {
+              throw 'ZIP entry count or uniqueness mismatch'
+            }
+            foreach ($name in $expected) { if ($names -notcontains $name) { throw ('Missing ZIP entry: ' + $name) } }
+            foreach ($entry in $archive.Entries) {
+              if ($entry.FullName.StartsWith('/') -or $entry.FullName.Contains('\') -or $entry.FullName -match '(^|/)\.\.(/|$)') {
+                throw ('Unsafe ZIP path: ' + $entry.FullName)
+              }
+              $stream = $entry.Open()
+              try { $stream.CopyTo([IO.Stream]::Null) } finally { $stream.Dispose() }
+            }
+          } finally { $archive.Dispose() }
+          $manifest = Join-Path $env:RUNNER_TEMP 'TurboTad_0.4.0-rc.1_SHA256_MANIFEST.txt'
+          $lines = @('TurboTad 0.4.0-rc.1 SOURCE-BACKED RELEASE CANDIDATE',
+                     ('Source commit: ' + $env:GITHUB_SHA),
+                     'Archive contents SHA-256:')
+          foreach ($file in $sourceFiles) {
+            $relative = $file.FullName.Substring($root.Length + 1).Replace('\', '/')
+            $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            $lines += ($hash + '  ' + $relative)
+          }
+          $lines += ('ZIP SHA-256: ' + (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant())
+          $lines | Set-Content -LiteralPath $manifest -Encoding UTF8
+          Write-Host ('VERIFIED RELEASE CANDIDATE ZIP: ' + $zip)
+          Write-Host ($lines -join [Environment]::NewLine)
+      - name: Upload private release-candidate artifact and manifest
         uses: actions/upload-artifact@v4
         with:
-          name: TurboTad-GUI-DynamicAccel-TEST
-          path: ${{ runner.temp }}\TurboTad_GUI_DynamicAccel_TEST.zip
+          name: TurboTad-v0.4.0-rc.1-PRIVATE-RC
+          path: |
+            ${{ runner.temp }}\TurboTad_0.4.0-rc.1_RELEASE_CANDIDATE.zip
+            ${{ runner.temp }}\TurboTad_0.4.0-rc.1_SHA256_MANIFEST.txt
           if-no-files-found: error
           retention-days: 14

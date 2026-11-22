@@ -247,7 +247,7 @@ namespace TurboTad
         public ControlsWindow(string modRoot)
         {
             root = modRoot;
-            Text = "TurboTad - 0.3.15B LOCAL BOOST AUDIO";
+            Text = "TurboTad 0.4.0-rc.1";
             string soundPath = Path.Combine(root, "Assets", "TurboTadBoost.wav");
             if (File.Exists(soundPath))
             {
@@ -302,7 +302,7 @@ namespace TurboTad
 
         private void BuildBetaflightInterface()
         {
-            Text = "TurboTad | Universal Input Mapper - TEST 1A";
+            Text = "TurboTad | v0.4.0-rc.1";
             ClientSize = new Size(1120, 800);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -350,7 +350,7 @@ namespace TurboTad
             brandMark.BackColor = Surface;
             Controls.Add(brandMark);
             Label heading = UiLabel(this, "TURBOTAD", 147, 11, 490, 42, 23F, Color.White, true);
-            UiLabel(this, "FLIGHT CONFIGURATOR  /  STABLE BRANCH", 150, 50, 600, 24, 9F, Muted);
+            UiLabel(this, "FLIGHT CONFIGURATOR  /  SUBNAUTICA 2 STABLE", 150, 50, 600, 24, 9F, Muted);
             UiLabel(this, "6DOF  •  ANALOG CONTROL  •  DIRECTIONAL BOOST", 710, 27, 384, 30, 9.5F, Orange, true).TextAlign = ContentAlignment.MiddleRight;
 
             dashboardTabs = new TabControl();
@@ -567,11 +567,11 @@ namespace TurboTad
             footer.Controls.Add(status);
             Button about = ThemeButton(footer, "ABOUT", 824, 17, 95, 48, false);
             about.Click += delegate { MessageBox.Show(this,
-                "TurboTad 0.3.15B  •  Flight Configurator GUI\r\n\r\nSix-axis analog Tadpole controls with linked flight and boost speed.\r\n\r\n" +
+                "TurboTad 0.4.0-rc.1  •  Flight Configurator\r\n\r\nSix-axis analog Tadpole controls with linked flight and boost speed.\r\n\r\n" +
                 "The rotation settings are engine-input multipliers, not calibrated degrees/second. " +
                 "Estimated mph assumes a native 1000 cm/s swim cap observed on the tested build.\r\n\r\n" +
                 "Runs locally. No network telemetry, administrator rights or controller-driver changes.\r\n\r\n" +
-                "WARNING: Breaching the water surface at high speed can launch the Tadpole out of the map. Back up saves and slow down before surfacing.",
+                "WARNING: This mod can break your game. Breaching the water surface at high speed can launch the Tadpole out of the map. Back up your saves and slow down before surfacing.",
                 "About TurboTad", MessageBoxButtons.OK, MessageBoxIcon.Information); };
             start.Text = "START CONTROLS";
             start.SetBounds(932, 16, 168, 49);
