@@ -317,6 +317,61 @@ internal static class InputMapperUiSelfTest
                 saved.Load(profilePath);
                 if (saved.DocumentElement["FlightTuning"] != null)
                     throw new Exception("Opt-out did not remove flight tuning from saved profile");
+                // A boost assignment belongs to the input profile regardless of the
+                // separate opt-in for flight tuning. Reordering discovered controls
+                // must not silently turn the selected boost button into "none".
+                Type inputSourceType = a.GetType("TurboTad.InputSource", true);
+                object xboxRb = inputSourceType.GetMethod("XboxButton",
+                    BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, new object[] { 0, 9 });
+                object xboxA = inputSourceType.GetMethod("XboxButton",
+                    BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, new object[] { 0, 10 });
+                ComboBox boostSelect = (ComboBox)t.GetField("boostChoice", Flags).GetValue(f);
+                Call(t, f, "SelectBoostSource", xboxRb);
+                if (boostSelect.SelectedItem.ToString() != "Xbox 1 / RB")
+                    throw new Exception("Boost binding was not selected");
+                object inventory = t.GetField("discovered", Flags).GetValue(f);
+                Type inventoryType = a.GetType("TurboTad.InputDiscoveryCatalog", true);
+                if (!(bool)inventoryType.GetMethod("Add", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(inventory, new object[] { xboxRb }))
+                    throw new Exception("Boost discovery fixture could not add source");
+                Call(t, f, "PromoteDiscoveredOptions");
+                if (boostSelect.SelectedItem == null || boostSelect.SelectedItem.ToString() != "Xbox 1 / RB")
+                    throw new Exception("Discovered button reorder erased the selected boost binding");
+                Call(t, f, "SaveInputProfileTo", profilePath);
+                saved.Load(profilePath);
+                XmlElement boostFromProfile = (XmlElement)saved.SelectSingleNode(
+                    "/TurboTadInputProfile/UniversalInput/Boost");
+                if (boostFromProfile == null || boostFromProfile.GetAttribute("kind") != "xbutton" ||
+                    boostFromProfile.GetAttribute("device") != "xinput:0" ||
+                    boostFromProfile.GetAttribute("code") != "9")
+                    throw new Exception("Saved input profile is missing Xbox RB boost");
+                string secondProfile = Path.Combine(root, "second-boost-profile.xml");
+                Call(t, f, "SelectBoostSource", xboxA);
+                Call(t, f, "SaveInputProfileTo", secondProfile);
+                XmlDocument otherBoost = new XmlDocument(); otherBoost.Load(secondProfile);
+                XmlElement secondBoostNode = (XmlElement)otherBoost.SelectSingleNode(
+                    "/TurboTadInputProfile/UniversalInput/Boost");
+                if (secondBoostNode == null || secondBoostNode.GetAttribute("code") != "10")
+                    throw new Exception("Second input profile is missing Xbox A boost");
+                // Exercise the exact LoadUniversalBindings method called by the
+                // profile import dialog; the actual picker is interactive.
+                Call(t, f, "LoadUniversalBindings", saved.DocumentElement["UniversalInput"]);
+                if (boostSelect.SelectedItem == null || boostSelect.SelectedItem.ToString() != "Xbox 1 / RB")
+                    throw new Exception("Loading first profile failed to restore Xbox RB boost");
+                Call(t, f, "LoadUniversalBindings", otherBoost.DocumentElement["UniversalInput"]);
+                if (boostSelect.SelectedItem == null || boostSelect.SelectedItem.ToString() != "Xbox 1 / A")
+                    throw new Exception("Loading second profile failed to restore Xbox A boost");
+                t.GetField("activeInputProfilePath", Flags).SetValue(f, profilePath);
+                Call(t, f, "ExportInputProfile");
+                saved.Load(profilePath);
+                if (((XmlElement)saved.SelectSingleNode(
+                    "/TurboTadInputProfile/UniversalInput/Boost")).GetAttribute("code") != "10")
+                    throw new Exception("Save Profile did not update the boost button in an existing profile");
+                Call(t, f, "SaveMapping");
+                config.Load(mapping);
+                if (((XmlElement)config.SelectSingleNode("/TurboTad/UniversalInput/Boost"))
+                    .GetAttribute("code") != "10")
+                    throw new Exception("Loaded boost binding did not reach mapping.xml");
                 if (Directory.GetFiles(root, ".*.tmp").Length != 0)
                     throw new Exception("Profile save leaked a temporary file");
                 f.Close();
