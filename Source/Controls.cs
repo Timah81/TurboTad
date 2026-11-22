@@ -294,6 +294,8 @@ namespace TurboTad
         private TabControl dashboardTabs;
         private NumericUpDown mphInput;
         private bool updatingMph;
+        private string activeInputProfilePath;
+        private Label activeProfileLabel;
         private const decimal BaseMphAtHundred = 22.36936M; // Observed 1000 cm/s swimming cap; estimated, not a live telemetry reading.
 
         private void BuildBetaflightInterface()
@@ -480,7 +482,11 @@ namespace TurboTad
             saveProfile.Click += delegate { ExportInputProfile(); };
             Button loadProfile = ThemeButton(input, "LOAD PROFILE", 606, 483, 157, 35, false);
             loadProfile.Click += delegate { ImportInputProfile(); };
-            UiLabel(input, "Profiles store input bindings only.", 435, 525, 545, 24, 9F, Muted);
+            Button saveNewProfile = ThemeButton(input, "SAVE AS NEW...", 435, 526, 157, 33, false);
+            saveNewProfile.Click += delegate { ExportNewInputProfile(); };
+            activeProfileLabel = UiLabel(input, "Active input profile: none", 606, 527, 430, 29, 9F, Muted);
+            activeProfileLabel.AutoEllipsis = true;
+            UiLabel(input, "Profiles store input bindings only (not flight tuning).", 435, 563, 545, 24, 9F, Muted);
             // Deliberately read-only: XInput detection must not change mappings or game controls.
             Button testXboxInput = ThemeButton(input, "TEST XBOX INPUT", 782, 483, 255, 35, false);
             testXboxInput.Click += delegate { using (XInputDiagnosticDialog dialog = new XInputDiagnosticDialog()) dialog.ShowDialog(this); };
