@@ -4,6 +4,7 @@ on:
     branches:
       - test/gui-numeric-step-one
       - release/turbotad-v0.4.0-rc1
+      - 'fix/**'
   workflow_dispatch:
 
 jobs:

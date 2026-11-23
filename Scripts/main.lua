@@ -30,14 +30,19 @@ local function cooldownNow(pawn)
     local worldOK,world=pcall(function() return timePawn:GetWorld():GetAddress() end)
     return boost:time(ok and real or nil,os.time(),worldOK and world or nil)
 end
+local boostStatusErrorLogged=false
 local function writeBoostStatus(active)
-    pcall(function()
+    local ok,err=pcall(function()
         local now=os.time()
         local remaining=boost:remaining(cooldownNow())
         local code=failed and 4 or (boost.error and 2 or (not active and 3 or (remaining>0 and 1 or 0)))
         local f=io.open(scripts..'../boost-status.txt','w')
         if f then f:write('T6S2 '..now..' '..remaining..' '..code..' '..(boost.lastRequested or 0)..'\n');f:close() end
     end)
+    if not ok and not boostStatusErrorLogged then
+        boostStatusErrorLogged=true
+        print('[TurboTad] boost status update failed: '..tostring(err))
+    end
 end
 local function unwrap(v)
     if type(v)=='number' then return v end
@@ -90,6 +95,7 @@ local function onTick(context,delta)
         end
     end)
     if not ok then
+        print('[TurboTad] onTick failed; disabling mod: '..tostring(err))
         controller:reset();failed=true
         hud:cleanup()
         writeBoostStatus(false)
@@ -188,6 +194,7 @@ local ok,err=pcall(function()
     end)
 end)
 if not ok then
+    print('[TurboTad] native hook registration failed; disabling mod: '..tostring(err))
     failed=true;do end
     writeBoostStatus(false)
 end
@@ -243,6 +250,7 @@ if nativeHook then
                 end
             end)
             if not success then
+                print('[TurboTad] maintenance failed; disabling mod: '..tostring(problem))
                 controller:reset();failed=true
                 hud:cleanup()
                 writeBoostStatus(false)
