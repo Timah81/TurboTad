@@ -1,5 +1,4 @@
--- Personal audio test build. T6S2 publishes a successful boost token to the companion.
-print('[TurboTad] 0.3.15A BOOST SOUND TRIGGER loaded; status protocol T6S2 active.')
+-- TurboTad runtime. T6S2 remains the boost-status protocol.
 local source=debug.getinfo(1,'S').source:gsub('^@','')
 local scripts=assert(source:match('^(.*[/\\])'),'Cannot locate mod script directory')
 local core=dofile(scripts..'core.lua')
@@ -31,14 +30,19 @@ local function cooldownNow(pawn)
     local worldOK,world=pcall(function() return timePawn:GetWorld():GetAddress() end)
     return boost:time(ok and real or nil,os.time(),worldOK and world or nil)
 end
+local boostStatusErrorLogged=false
 local function writeBoostStatus(active)
-    pcall(function()
+    local ok,err=pcall(function()
         local now=os.time()
         local remaining=boost:remaining(cooldownNow())
         local code=failed and 4 or (boost.error and 2 or (not active and 3 or (remaining>0 and 1 or 0)))
         local f=io.open(scripts..'../boost-status.txt','w')
         if f then f:write('T6S2 '..now..' '..remaining..' '..code..' '..(boost.lastRequested or 0)..'\n');f:close() end
     end)
+    if not ok and not boostStatusErrorLogged then
+        boostStatusErrorLogged=true
+        print('[TurboTad] boost status update failed: '..tostring(err))
+    end
 end
 local function unwrap(v)
     if type(v)=='number' then return v end
@@ -91,11 +95,78 @@ local function onTick(context,delta)
         end
     end)
     if not ok then
+        print('[TurboTad] onTick failed; disabling mod: '..tostring(err))
         controller:reset();failed=true
         hud:cleanup()
         writeBoostStatus(false)
     end
 end
+-- Stock PlayerController look input must be suppressed only while TurboTad
+-- controls the eligible, locally piloted Tadpole. Preserve this flight hook.
+local lookErrors={}
+local function filterNativeLook(axis,context,amount)
+    local ok,err=pcall(function()
+        local pc=context:get()
+        if not valid(pc) or not controller.target then return end
+        local pawn=pc:K2_GetPawn()
+        if not controller:owns(pawn) or not controller:eligible(pawn) then return end
+        if not controller:inputAllowed(pawn) then return end
+        amount:set(0)
+    end)
+    if not ok and not lookErrors[axis] then
+        lookErrors[axis]=true
+        print('[TurboTad] native '..axis..' look suppression error: '..tostring(err))
+    end
+end
+local function registerNativeLook(axis,path)
+    local ok,preId=pcall(function()
+        return RegisterHook(path,function(context,amount)
+            filterNativeLook(axis,context,amount)
+        end)
+    end)
+    if not ok or preId==nil then
+        print('[TurboTad] native '..axis..' look hook unavailable: '..tostring(preId))
+    end
+end
+registerNativeLook('Yaw','/Script/Engine.PlayerController:AddYawInput')
+registerNativeLook('Pitch','/Script/Engine.PlayerController:AddPitchInput')
+
+-- Suppress stock world-vertical movement while TurboTad owns the locally
+-- piloted Tadpole so vertical thrust remains relative to the sub's orientation.
+-- Keep the exact vector, eligibility and injection guards unchanged.
+local ascendErrorLogged=false
+local function filterNativeAscend(context,worldVector)
+    local ok,err=pcall(function()
+        if controller.injecting or not controller.target then return end
+        local component=context:get()
+        if not valid(component) then return end
+        local pawn=component:GetOwner()
+        if not valid(pawn) or not controller:owns(pawn)
+            or not controller:eligible(pawn) or not controller:inputAllowed(pawn) then return end
+        local v=worldVector:get()
+        if not v then return end
+        local x,y,z=tonumber(v.X),tonumber(v.Y),tonumber(v.Z)
+        if not x or not y or not z then return end
+        -- An unrelated input vector, even one having a Z component, must pass.
+        if math.abs(x)>0.001 or math.abs(y)>0.001 or
+            math.abs(math.abs(z)-1)>0.001 then return end
+        v.X=0;v.Y=0;v.Z=0
+    end)
+    if not ok and not ascendErrorLogged then
+        ascendErrorLogged=true
+        print('[TurboTad] vertical suppression error: '..tostring(err))
+    end
+end
+local ascendRegistered,ascendPreId=pcall(function()
+    return RegisterHook('/Script/Engine.PawnMovementComponent:AddInputVector',
+        function(context,worldVector)
+            filterNativeAscend(context,worldVector)
+        end)
+end)
+if not ascendRegistered or ascendPreId==nil then
+    print('[TurboTad] vertical hook unavailable: '..tostring(ascendPreId))
+end
+
 -- Suppress the stock look/banking input only while this mod owns the local vehicle.
 local ok,err=pcall(function()
     RegisterHook('/Script/Subnautica2.SN2Tadpole:AddInputRotator',function(context,rotator)
@@ -123,6 +194,7 @@ local ok,err=pcall(function()
     end)
 end)
 if not ok then
+    print('[TurboTad] native hook registration failed; disabling mod: '..tostring(err))
     failed=true;do end
     writeBoostStatus(false)
 end
@@ -178,6 +250,7 @@ if nativeHook then
                 end
             end)
             if not success then
+                print('[TurboTad] maintenance failed; disabling mod: '..tostring(problem))
                 controller:reset();failed=true
                 hud:cleanup()
                 writeBoostStatus(false)

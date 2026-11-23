@@ -36,6 +36,25 @@ internal static class UiSelfTest
         throw new Exception("Missing GUI heading: " + exactText);
     }
 
+    // All visible numeric editors must permit intermediate typing without
+    // validation on every live .Value read. Top-speed percent is now a
+    // visible editor alongside estimated mph and must be counted too.
+    private static int AssertDeferredEditors(Control parent)
+    {
+        int count = 0;
+        foreach (Control control in parent.Controls)
+        {
+            if (control is NumericUpDown)
+            {
+                if (control.GetType().Name != "DeferredNumericUpDown")
+                    throw new Exception("Numeric editor still validates during typing: " + control.Name);
+                count++;
+            }
+            count += AssertDeferredEditors(control);
+        }
+        return count;
+    }
+
     [STAThread]
     private static int Main(string[] args)
     {
@@ -72,6 +91,11 @@ internal static class UiSelfTest
             }
             using (Form form = (Form)Activator.CreateInstance(formType, new object[] { modRoot }))
             {
+                // Fresh install: boost HUD defaults are shared with the in-game Lua fallback.
+                // A saved mapping.xml, when present, still overrides these values on load.
+                if ((decimal)Field(formType, form, "hudRight") != 400M ||
+                    (decimal)Field(formType, form, "hudBottom") != 50M)
+                    throw new Exception("Incorrect fresh-install boost HUD default position");
                 TabControl tabs = (TabControl)Field(formType, form, "dashboardTabs");
                 if (tabs.TabPages.Count != 3) throw new Exception("Expected 3 GUI tabs");
                 if (tabs.TabPages[2].Text != "BOOST HUD") throw new Exception("Boost HUD tab label is incorrect");
@@ -109,6 +133,11 @@ internal static class UiSelfTest
                 NumericUpDown[] movement = (NumericUpDown[])Field(formType, form, "movementRates");
                 NumericUpDown savedSpeed = (NumericUpDown)Field(formType, form, "topSpeed");
                 NumericUpDown mph = (NumericUpDown)Field(formType, form, "mphInput");
+                int deferredEditors = AssertDeferredEditors(form);
+                if (deferredEditors != 10)
+                    throw new Exception("Expected 10 visible delayed-commit editors, got " + deferredEditors);
+                if (rotation[0].Minimum != 10 || movement[0].Minimum != 10 || mph.Minimum <= 0)
+                    throw new Exception("A real numeric range was changed just to permit typing");
                 // Cosmetic cleanup: no stale explanatory subheadings, even on other tabs.
                 AssertNoLabelContains(form, "No calibrated °/s available");
                 AssertNoLabelContains(form, "Estimated mph from the observed");
@@ -132,6 +161,10 @@ internal static class UiSelfTest
                 if (mph.Height < 20 || mph.Width < 90)
                     throw new Exception("Speed editor dimensions are unexpectedly small");
                 Control speedCard = mph.Parent;
+                if (savedSpeed.Parent != speedCard || savedSpeed.Increment != 1)
+                    throw new Exception("Editable 1% top-speed percentage box not visible beside mph");
+                if (savedSpeed.Right > mph.Left || savedSpeed.Top != mph.Top)
+                    throw new Exception("Top-speed percentage overlaps mph or is not aligned");
                 Control speedSlider = null;
                 foreach (Control control in speedCard.Controls)
                     if (control.GetType().Name == "RateSlider") { speedSlider = control; break; }
@@ -165,6 +198,32 @@ internal static class UiSelfTest
                 if (mph.Value < 89M || mph.Value > 90M) throw new Exception("mph display not linked to saved percent");
                 mph.Value = 22.4M;
                 if (savedSpeed.Value != 100M) throw new Exception("mph input not linked back to speed percent");
+
+                // Regression for the user-observed clipping at the bottom of Input Mapping.
+                tabs.SelectedIndex = 1;
+                TabPage mappingPage = tabs.TabPages[1];
+                IntPtr inputHandle = mappingPage.Handle;
+                mappingPage.PerformLayout();
+                CheckBox flightOptIn = (CheckBox)Field(formType, form, "includeFlightTuningInProfile");
+                if (flightOptIn.Parent != mappingPage || flightOptIn.Checked ||
+                    flightOptIn.Text != "Include flight tuning")
+                    throw new Exception("Optional flight tuning checkbox is missing or not default-off");
+                if (flightOptIn.Bottom > mappingPage.ClientSize.Height - 8 ||
+                    flightOptIn.Right > mappingPage.ClientSize.Width - 8)
+                    throw new Exception("Flight tuning checkbox clipped by Input Mapping tab: bottom " +
+                        flightOptIn.Bottom + ", viewport " + mappingPage.ClientSize.Height);
+                Button saveProfile = null;
+                foreach (Control c in mappingPage.Controls)
+                {
+                    Button button = c as Button;
+                    if (button == null) continue;
+                    if (button.Text == "TEST XBOX INPUT")
+                        throw new Exception("Obsolete Xbox diagnostic button remains visible");
+                    if (button.Text == "SAVE PROFILE") saveProfile = button;
+                }
+                if (saveProfile == null || flightOptIn.Top > saveProfile.Bottom ||
+                    flightOptIn.Bottom < saveProfile.Top || flightOptIn.Left <= saveProfile.Right)
+                    throw new Exception("Flight tuning checkbox not beside Save Profile");
                 form.Close();
             }
             Console.WriteLine("GUI test passed: obsolete subtitles removed, speed layout, WAV picker, numeric entry and speed synchronization.");

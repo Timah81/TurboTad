@@ -1,0 +1,475 @@
+using System;
+using System.IO;
+using System.Reflection;
+using System.Windows.Forms;
+using System.Xml;
+internal static class InputMapperUiSelfTest
+{
+    private static BindingFlags Flags = BindingFlags.Instance | BindingFlags.NonPublic;
+    private static object Call(Type t, object f, string name, params object[] args) { return t.GetMethod(name, Flags).Invoke(f, args); }
+    private static void AssertSameXboxAxisOptions(ComboBox[] choices)
+    {
+        string expected = null;
+        for (int row = 0; row < choices.Length; row++)
+        {
+            System.Collections.Generic.List<string> items = new System.Collections.Generic.List<string>();
+            System.Collections.Generic.HashSet<string> unique = new System.Collections.Generic.HashSet<string>();
+            foreach (object candidate in choices[row].Items)
+            {
+                string label = candidate.ToString();
+                if (!label.StartsWith("Xbox ", StringComparison.Ordinal)) continue;
+                if (!unique.Add(label)) throw new Exception("Duplicate Xbox axis in flight row " + row + ": " + label);
+                items.Add(label);
+            }
+            string actual = string.Join("|", items.ToArray());
+            if (expected == null) expected = actual;
+            else if (!string.Equals(expected, actual, StringComparison.Ordinal))
+                throw new Exception("Xbox analog options differ between flight row 0 and row " + row);
+        }
+    }
+    [STAThread] private static int Main(string[] args)
+    {
+        try
+        {
+            string root = args[1]; Directory.CreateDirectory(root);
+            string mapping = Path.Combine(root, "mapping.xml");
+            string legacy = "<TurboTad deadzone='0.04' topSpeed='175'><Axis row='0' id='3' mid='231' pid='12' name='Offline VKB' axis='2' invert='1'/><BoostButton id='3' mid='231' pid='12' name='Offline VKB' button='4'/></TurboTad>";
+            File.WriteAllText(mapping, legacy);
+            Assembly a = Assembly.LoadFrom(args[0]); Type t = a.GetType("TurboTad.ControlsWindow", true);
+            // Every digital direction must have a manual Xbox button picker,
+            // even when no Xbox is currently connected or awake.
+            Type pairType = a.GetType("TurboTad.DirectionPairDialog", true);
+            Type axisType = a.GetType("TurboTad.AxisBinding", true);
+            Type deviceType = a.GetType("TurboTad.Device", true);
+            object emptyPair = Activator.CreateInstance(axisType, true);
+            object emptyDevices = Activator.CreateInstance(
+                typeof(System.Collections.Generic.List<>).MakeGenericType(deviceType));
+            using (Form pair = (Form)Activator.CreateInstance(pairType,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                null, new object[]{ "Thrust up / down", "Down", "Up", emptyPair, emptyDevices }, null))
+            {
+                ComboBox negativeOptions = (ComboBox)pairType.GetField("negativeChoice", Flags).GetValue(pair);
+                ComboBox positiveOptions = (ComboBox)pairType.GetField("positiveChoice", Flags).GetValue(pair);
+                int lb = -1, rb = -1;
+                for (int i = 0; i < negativeOptions.Items.Count; i++)
+                {
+                    if (negativeOptions.Items[i].ToString() == "Xbox 1 / LB") lb = i;
+                    if (positiveOptions.Items[i].ToString() == "Xbox 1 / RB") rb = i;
+                }
+                if (lb < 0 || rb < 0) throw new Exception("Manual digital pair has no Xbox bumper selections");
+                negativeOptions.SelectedIndex = lb; positiveOptions.SelectedIndex = rb;
+                object selectedNegative = pairType.GetField("negative", Flags).GetValue(pair);
+                object selectedPositive = pairType.GetField("positive", Flags).GetValue(pair);
+                if ((string)selectedNegative.GetType().GetField("Device", Flags).GetValue(selectedNegative) != "xinput:0" ||
+                    (int)selectedNegative.GetType().GetField("Code", Flags).GetValue(selectedNegative) != 8 ||
+                    (string)selectedPositive.GetType().GetField("Device", Flags).GetValue(selectedPositive) != "xinput:0" ||
+                    (int)selectedPositive.GetType().GetField("Code", Flags).GetValue(selectedPositive) != 9)
+                    throw new Exception("Manual Xbox bumpers were not selected as XInput sources");
+            }
+            using (Form f = (Form)Activator.CreateInstance(t, new object[]{ root }))
+            {
+                Call(t, f, "SaveMapping");
+                XmlDocument d = new XmlDocument(); d.Load(mapping);
+                if (d.SelectSingleNode("/TurboTad/Axis[@name='Offline VKB']") == null) throw new Exception("Saving erased unplugged legacy axis");
+                if (d.SelectSingleNode("/TurboTad/BoostButton[@button='4']") == null) throw new Exception("Saving erased unplugged boost");
+                if (!File.Exists(Path.Combine(root, "mapping.before-uim.xml"))) throw new Exception("Pre-upgrade mapping backup missing");
+                f.Close();
+            }
+            XmlDocument config = new XmlDocument(); config.LoadXml("<TurboTad><UniversalInput version='1'/></TurboTad>");
+            XmlElement uim = (XmlElement)config.DocumentElement.FirstChild;
+            for (int row=0; row<6; row++)
+            {
+                XmlElement b = config.CreateElement("Binding"); b.SetAttribute("row",row.ToString()); b.SetAttribute("mode","digital");
+                foreach (string name in new string[]{"Negative","Positive"})
+                {
+                    XmlElement s=config.CreateElement(name);s.SetAttribute("kind","key");s.SetAttribute("code",(65+row*2+(name=="Positive"?1:0)).ToString());b.AppendChild(s);
+                }
+                uim.AppendChild(b);
+            }
+            config.Save(mapping);
+            using(Form f = (Form)Activator.CreateInstance(t,new object[]{root}))
+            {
+                object[] evaluated = new object[]{null};
+                if (!(bool)Call(t,f,"TryGetAxes",evaluated)) throw new Exception("Keyboard-only mapping requires a joystick");
+                Call(t,f,"StartControls");
+                if (!(bool)t.GetField("running",Flags).GetValue(f)) throw new Exception("Keyboard-only controls failed to start");
+                Call(t,f,"StopControls"); Call(t,f,"SaveMapping");
+                config.Load(mapping);
+                if (config.SelectNodes("/TurboTad/UniversalInput/Binding[@mode='digital']").Count!=6) throw new Exception("Digital mapping roundtrip failed");
+                XmlDocument duplicate = new XmlDocument(); duplicate.LoadXml(config.OuterXml);
+                ((XmlElement)duplicate.SelectSingleNode("/TurboTad/UniversalInput/Binding[@row='1']/Negative")).SetAttribute("code","65");
+                string previousMapping = File.ReadAllText(mapping);
+                bool duplicateRejected = false;
+                try { Call(t,f,"LoadUniversalBindings",duplicate.DocumentElement["UniversalInput"]); }
+                catch(TargetInvocationException e) { if(e.InnerException is FormatException)duplicateRejected=true; else throw; }
+                if(!duplicateRejected)throw new Exception("Conflicting profile was accepted");
+                Call(t,f,"SaveMapping");
+                if(File.ReadAllText(mapping)!=previousMapping)throw new Exception("Rejected profile changed current mapping");
+                string[] words = File.ReadAllText(Path.Combine(root,"input.txt")).Split((char[])null,StringSplitOptions.RemoveEmptyEntries);
+                if(words.Length!=21 || words[0]!="T6D7" || words[3]!="0") throw new Exception("Existing stopped protocol changed");
+                for(int i=4;i<10;i++) if(Double.Parse(words[i],System.Globalization.CultureInfo.InvariantCulture)!=0) throw new Exception("Stop sent motion");
+                f.Close();
+            }
+            XmlDocument savedConflict = new XmlDocument(); savedConflict.LoadXml(config.OuterXml);
+            ((XmlElement)savedConflict.SelectSingleNode("/TurboTad/UniversalInput/Binding[@row='1']/Negative")).SetAttribute("code","65");
+            savedConflict.Save(mapping);
+            using(Form f = (Form)Activator.CreateInstance(t,new object[]{root}))
+            {
+                if(t.GetField("mappingLoadError",Flags).GetValue(f)!=null)
+                    throw new Exception("Readable saved conflict is latched as an unrecoverable load error");
+                Call(t,f,"StartControls");
+                if((bool)t.GetField("running",Flags).GetValue(f))throw new Exception("Conflicting saved bindings started");
+                string conflict=(string)t.GetField("mappingError",Flags).GetValue(f);
+                if(conflict.IndexOf("Forward",StringComparison.OrdinalIgnoreCase)<0 || conflict.IndexOf("Strafe",StringComparison.OrdinalIgnoreCase)<0)
+                    throw new Exception("Conflict does not name both affected axes");
+                Array pairs = (Array)t.GetField("directionPairs",Flags).GetValue(f);
+                object rowOne = pairs.GetValue(1);
+                object negative = rowOne.GetType().GetField("Negative",Flags).GetValue(rowOne);
+                negative.GetType().GetField("Code",Flags).SetValue(negative,67);
+                Call(t,f,"StartControls");
+                if(!(bool)t.GetField("running",Flags).GetValue(f))throw new Exception("Corrected saved conflict still blocks Start");
+                Call(t,f,"StopControls"); f.Close();
+            }
+            XmlDocument xbox = new XmlDocument(); xbox.LoadXml(config.OuterXml);
+            XmlElement xboxRow = (XmlElement)xbox.SelectSingleNode("/TurboTad/UniversalInput/Binding[@row='0']");
+            xboxRow.SetAttribute("mode", "analog"); xboxRow.SetAttribute("invert", "1");
+            while(xboxRow.HasChildNodes) xboxRow.RemoveChild(xboxRow.FirstChild);
+            XmlElement xboxAnalog = xbox.CreateElement("Analog");
+            xboxAnalog.SetAttribute("kind", "xaxis"); xboxAnalog.SetAttribute("device", "xinput:0"); xboxAnalog.SetAttribute("code", "0");
+            xboxRow.AppendChild(xboxAnalog);
+            // Saving a mapping always creates one Boost node, even when unassigned.
+            // Update that existing node instead of adding a duplicate that the loader ignores.
+            XmlElement xboxBoost = xbox.DocumentElement["UniversalInput"]["Boost"];
+            if (xboxBoost == null) throw new Exception("Xbox test fixture is missing its Boost node");
+            xboxBoost.SetAttribute("kind", "xbutton"); xboxBoost.SetAttribute("device", "xinput:0"); xboxBoost.SetAttribute("code", "10");
+            if (xbox.DocumentElement["UniversalInput"].SelectNodes("Boost").Count != 1)
+                throw new Exception("Xbox test fixture created duplicate Boost nodes");
+            xbox.Save(mapping);
+            using(Form f=(Form)Activator.CreateInstance(t,new object[]{root}))
+            {
+                if(t.GetField("mappingLoadError",Flags).GetValue(f)!=null) throw new Exception("Xbox profile failed to load while controller unplugged");
+                if(t.GetField("xboxFlightTest",Flags)!=null) throw new Exception("Obsolete Xbox opt-in checkbox remains");
+                // No special opt-in. On an actual Windows gaming PC, Xbox 1
+                // may be connected during this automated test. Only demand
+                // disconnected rejection when it really is disconnected.
+                bool[] availableXbox = (bool[])t.GetField("xboxConnected",Flags).GetValue(f);
+                bool xboxOnePresent = availableXbox[0];
+                Call(t,f,"StartControls");
+                bool startedXbox = (bool)t.GetField("running",Flags).GetValue(f);
+                if(!xboxOnePresent && startedXbox) throw new Exception("Disconnected Xbox mapping started");
+                if(startedXbox) Call(t,f,"StopControls");
+                Call(t,f,"SaveMapping");
+                config.Load(mapping);
+                XmlElement savedXbox=(XmlElement)config.SelectSingleNode("/TurboTad/UniversalInput/Binding[@row='0']/Analog");
+                if(savedXbox==null || savedXbox.GetAttribute("kind")!="xaxis" || savedXbox.GetAttribute("device")!="xinput:0")
+                    throw new Exception("Xbox axis did not survive SaveMapping");
+                if(((XmlElement)config.SelectSingleNode("/TurboTad/UniversalInput/Binding[@row='0']")).GetAttribute("invert")!="1")
+                    throw new Exception("Xbox axis manual inversion was lost");
+                XmlElement savedBoost=(XmlElement)config.SelectSingleNode("/TurboTad/UniversalInput/Boost");
+                if(savedBoost==null || savedBoost.GetAttribute("kind")!="xbutton")throw new Exception("Xbox boost binding did not roundtrip");
+                // Saved Xbox bindings must populate all six choices for that player,
+                // even on a machine where the physical pad is disconnected.
+                ComboBox[] choices = (ComboBox[])t.GetField("choices",Flags).GetValue(f);
+                AssertSameXboxAxisOptions(choices);
+                for (int row = 0; row < choices.Length; row++)
+                {
+                    int count = 0;
+                    foreach (object candidate in choices[row].Items)
+                        if (candidate.ToString().StartsWith("Xbox 1 / ", StringComparison.Ordinal)) count++;
+                    if (count != 7) throw new Exception("Saved offline Xbox axes missing in row " + row);
+                    bool pairedFound = false;
+                    foreach (object candidate in choices[row].Items)
+                        if (candidate.ToString() == "Xbox 1 / LT + RT (paired axis)") pairedFound = true;
+                    if (!pairedFound) throw new Exception("Optional paired trigger choice missing in row " + row);
+                }
+                // Regression: the Xbox can wake after the initial joystick/device scan.
+                // Simulate that change without requiring a physical controller in CI.
+                CheckBox[] invert = (CheckBox[])t.GetField("invert",Flags).GetValue(f);
+                bool[] xboxConnected = (bool[])t.GetField("xboxConnected",Flags).GetValue(f);
+                System.Collections.IDictionary baseline = (System.Collections.IDictionary)t.GetField("baseline",Flags).GetValue(f);
+                int learnRow = 2, player = 2;
+                for (int i = choices[learnRow].Items.Count - 1; i >= 0; i--)
+                {
+                    object candidate = choices[learnRow].Items[i];
+                    if (candidate.GetType().GetField("Xbox",BindingFlags.Instance|BindingFlags.NonPublic|BindingFlags.Public).GetValue(candidate)!=null)
+                        choices[learnRow].Items.RemoveAt(i);
+                }
+                Array.Clear(xboxConnected, 0, xboxConnected.Length);
+                xboxConnected[player] = true;
+                invert[learnRow].Checked = true;
+                Call(t,f,"EnsureXboxLearnCandidates",learnRow);
+                // Discovery repairs the intentionally divergent row and updates all
+                // others, regardless of which row initiated Learn.
+                AssertSameXboxAxisOptions(choices);
+                for (int row = 0; row < choices.Length; row++)
+                {
+                    int count = 0;
+                    foreach (object candidate in choices[row].Items)
+                        if (candidate.ToString().StartsWith("Xbox 3 / ", StringComparison.Ordinal)) count++;
+                    if (count != 7) throw new Exception("Hotplug Xbox axes missing in row " + row);
+                }
+                Call(t,f,"EnsureXboxLearnCandidates",learnRow);
+                AssertSameXboxAxisOptions(choices);
+                for(int axis=0;axis<7;axis++)
+                {
+                    string identity="xaxis:xinput:"+player+":"+axis;
+                    if(!baseline.Contains(identity) || (double)baseline[identity]!=0)
+                        throw new Exception("Late Xbox axis missing its neutral Learn baseline: "+identity);
+                }
+                if (!invert[learnRow].Checked)throw new Exception("Xbox discovery changed manual inversion");
+                f.Close();
+            }
+            // Opt-in paired mode survives a profile load and save while unplugged.
+            // Individual LT and RT must remain selectable in the same dropdowns.
+            XmlDocument pairedConfig = new XmlDocument(); pairedConfig.Load(mapping);
+            ((XmlElement)pairedConfig.SelectSingleNode("/TurboTad/UniversalInput/Binding[@row='0']/Analog"))
+                .SetAttribute("code", "6");
+            pairedConfig.Save(mapping);
+            using(Form f=(Form)Activator.CreateInstance(t,new object[]{root}))
+            {
+                if(t.GetField("mappingLoadError",Flags).GetValue(f)!=null)
+                    throw new Exception("Paired trigger profile was rejected on load");
+                ComboBox[] choices=(ComboBox[])t.GetField("choices",Flags).GetValue(f);
+                AssertSameXboxAxisOptions(choices);
+                if (choices[0].SelectedItem.ToString()!="Xbox 1 / LT + RT (paired axis)")
+                    throw new Exception("Saved paired trigger assignment not restored");
+                for (int row=0; row<choices.Length; row++)
+                {
+                    bool lt=false, rt=false, pairOption=false;
+                    foreach(object item in choices[row].Items)
+                    {
+                        string label=item.ToString();
+                        if(label=="Xbox 1 / LT")lt=true;
+                        if(label=="Xbox 1 / RT")rt=true;
+                        if(label=="Xbox 1 / LT + RT (paired axis)")pairOption=true;
+                    }
+                    if(!lt||!rt||!pairOption)
+                        throw new Exception("Separate and paired options missing in row "+row);
+                }
+                Call(t,f,"SaveMapping");
+                XmlDocument roundtrip=new XmlDocument();roundtrip.Load(mapping);
+                XmlElement analogNode=(XmlElement)roundtrip.SelectSingleNode("/TurboTad/UniversalInput/Binding[@row='0']/Analog");
+                if(analogNode==null||analogNode.GetAttribute("code")!="6"||
+                    analogNode.GetAttribute("kind")!="xaxis")
+                    throw new Exception("Paired trigger selection did not survive save");
+                f.Close();
+            }
+            // Optional flight-tuning profiles: legacy input-only save, opt-in roundtrip,
+            // overwrite selected profile, invalid-tuning rejection, and opt-out removal.
+            using (Form f = (Form)Activator.CreateInstance(t, new object[]{root}))
+            {
+                CheckBox optIn = (CheckBox)t.GetField("includeFlightTuningInProfile", Flags).GetValue(f);
+                NumericUpDown speed = (NumericUpDown)t.GetField("topSpeed", Flags).GetValue(f);
+                NumericUpDown[] rotation = (NumericUpDown[])t.GetField("rotationRates", Flags).GetValue(f);
+                NumericUpDown[] movement = (NumericUpDown[])t.GetField("movementRates", Flags).GetValue(f);
+                string profilePath = Path.Combine(root, "optional-flight-profile.xml");
+                speed.Value = 171;
+                rotation[0].Value = 700; rotation[1].Value = 893; rotation[2].Value = 271;
+                movement[0].Value = 300; movement[1].Value = 415; movement[2].Value = 146;
+                if (optIn.Checked) throw new Exception("Flight tuning inclusion must default to off");
+                Call(t, f, "SaveInputProfileTo", profilePath);
+                XmlDocument saved = new XmlDocument(); saved.Load(profilePath);
+                if (saved.DocumentElement["UniversalInput"] == null ||
+                    saved.DocumentElement["FlightTuning"] != null)
+                    throw new Exception("Input-only profile format changed");
+                optIn.Checked = true;
+                Call(t, f, "SaveInputProfileTo", profilePath);
+                saved.Load(profilePath);
+                XmlElement flight = saved.DocumentElement["FlightTuning"];
+                if (flight == null || flight.GetAttribute("version") != "1" ||
+                    flight.GetAttribute("topSpeed") != "171" ||
+                    flight.GetAttribute("yawRate") != "893" ||
+                    flight.GetAttribute("strafeRate") != "415")
+                    throw new Exception("Opt-in flight tuning did not roundtrip in XML");
+                speed.Value = 100;
+                rotation[0].Value = 100; rotation[1].Value = 100; rotation[2].Value = 100;
+                movement[0].Value = 100; movement[1].Value = 100; movement[2].Value = 100;
+                decimal[] values = (decimal[])Call(t, f, "ReadProfileFlightTuning", flight);
+                Call(t, f, "ApplyProfileFlightTuning", (object)values);
+                if (speed.Value != 171 || rotation[0].Value != 700 ||
+                    rotation[1].Value != 893 || rotation[2].Value != 271 ||
+                    movement[0].Value != 300 || movement[1].Value != 415 ||
+                    movement[2].Value != 146)
+                    throw new Exception("Opt-in flight tuning did not restore GUI values");
+                XmlDocument invalidProfile = new XmlDocument();
+                invalidProfile.LoadXml(saved.OuterXml);
+                invalidProfile.DocumentElement["FlightTuning"].SetAttribute("topSpeed", "401");
+                bool invalidFlightRejected = false;
+                try { Call(t, f, "ReadProfileFlightTuning", invalidProfile.DocumentElement["FlightTuning"]); }
+                catch (TargetInvocationException e)
+                {
+                    if (e.InnerException is FormatException) invalidFlightRejected = true;
+                    else throw;
+                }
+                if (!invalidFlightRejected || speed.Value != 171)
+                    throw new Exception("Out-of-range flight tuning was accepted or changed the GUI");
+                decimal[] absent = (decimal[])Call(t, f, "ReadProfileFlightTuning", new object[]{null});
+                if (absent != null || speed.Value != 171)
+                    throw new Exception("Legacy profile must retain current flight settings");
+                t.GetField("activeInputProfilePath", Flags).SetValue(f, profilePath);
+                speed.Value = 200;
+                Call(t, f, "ExportInputProfile");
+                saved.Load(profilePath);
+                if (saved.DocumentElement["FlightTuning"].GetAttribute("topSpeed") != "200")
+                    throw new Exception("Save Profile did not update the loaded profile");
+                optIn.Checked = false;
+                Call(t, f, "SaveInputProfileTo", profilePath);
+                saved.Load(profilePath);
+                if (saved.DocumentElement["FlightTuning"] != null)
+                    throw new Exception("Opt-out did not remove flight tuning from saved profile");
+                // A boost assignment belongs to the input profile regardless of the
+                // separate opt-in for flight tuning. Reordering discovered controls
+                // must not silently turn the selected boost button into "none".
+                Type inputSourceType = a.GetType("TurboTad.InputSource", true);
+                object xboxRb = inputSourceType.GetMethod("XboxButton",
+                    BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, new object[] { 0, 9 });
+                object xboxA = inputSourceType.GetMethod("XboxButton",
+                    BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, new object[] { 0, 10 });
+                ComboBox boostSelect = (ComboBox)t.GetField("boostChoice", Flags).GetValue(f);
+                Call(t, f, "SelectBoostSource", xboxRb);
+                if (boostSelect.SelectedItem.ToString() != "Xbox 1 / RB")
+                    throw new Exception("Boost binding was not selected");
+                object inventory = t.GetField("discovered", Flags).GetValue(f);
+                Type inventoryType = a.GetType("TurboTad.InputDiscoveryCatalog", true);
+                if (!(bool)inventoryType.GetMethod("Add", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(inventory, new object[] { xboxRb }))
+                    throw new Exception("Boost discovery fixture could not add source");
+                Call(t, f, "PromoteDiscoveredOptions");
+                if (boostSelect.SelectedItem == null || boostSelect.SelectedItem.ToString() != "Xbox 1 / RB")
+                    throw new Exception("Discovered button reorder erased the selected boost binding");
+                Call(t, f, "SaveInputProfileTo", profilePath);
+                saved.Load(profilePath);
+                XmlElement boostFromProfile = (XmlElement)saved.SelectSingleNode(
+                    "/TurboTadInputProfile/UniversalInput/Boost");
+                if (boostFromProfile == null || boostFromProfile.GetAttribute("kind") != "xbutton" ||
+                    boostFromProfile.GetAttribute("device") != "xinput:0" ||
+                    boostFromProfile.GetAttribute("code") != "9")
+                    throw new Exception("Saved input profile is missing Xbox RB boost");
+                string secondProfile = Path.Combine(root, "second-boost-profile.xml");
+                Call(t, f, "SelectBoostSource", xboxA);
+                Call(t, f, "SaveInputProfileTo", secondProfile);
+                XmlDocument otherBoost = new XmlDocument(); otherBoost.Load(secondProfile);
+                XmlElement secondBoostNode = (XmlElement)otherBoost.SelectSingleNode(
+                    "/TurboTadInputProfile/UniversalInput/Boost");
+                if (secondBoostNode == null || secondBoostNode.GetAttribute("code") != "10")
+                    throw new Exception("Second input profile is missing Xbox A boost");
+                // Exercise the exact LoadUniversalBindings method called by the
+                // profile import dialog; the actual picker is interactive.
+                Call(t, f, "LoadUniversalBindings", saved.DocumentElement["UniversalInput"]);
+                if (boostSelect.SelectedItem == null || boostSelect.SelectedItem.ToString() != "Xbox 1 / RB")
+                    throw new Exception("Loading first profile failed to restore Xbox RB boost");
+                Call(t, f, "LoadUniversalBindings", otherBoost.DocumentElement["UniversalInput"]);
+                if (boostSelect.SelectedItem == null || boostSelect.SelectedItem.ToString() != "Xbox 1 / A")
+                    throw new Exception("Loading second profile failed to restore Xbox A boost");
+                t.GetField("activeInputProfilePath", Flags).SetValue(f, profilePath);
+                Call(t, f, "ExportInputProfile");
+                saved.Load(profilePath);
+                if (((XmlElement)saved.SelectSingleNode(
+                    "/TurboTadInputProfile/UniversalInput/Boost")).GetAttribute("code") != "10")
+                    throw new Exception("Save Profile did not update the boost button in an existing profile");
+                Call(t, f, "SaveMapping");
+                config.Load(mapping);
+                if (((XmlElement)config.SelectSingleNode("/TurboTad/UniversalInput/Boost"))
+                    .GetAttribute("code") != "10")
+                    throw new Exception("Loaded boost binding did not reach mapping.xml");
+                if (Directory.GetFiles(root, ".*.tmp").Length != 0)
+                    throw new Exception("Profile save leaked a temporary file");
+                f.Close();
+            }
+            string invalid = "<TurboTad><UniversalInput version='99'/></TurboTad>";
+            File.WriteAllText(mapping,invalid);
+            using(Form f = (Form)Activator.CreateInstance(t,new object[]{root}))
+            {
+                Call(t,f,"SaveMapping"); f.Close();
+                if(File.ReadAllText(mapping)!=invalid)throw new Exception("Unsupported mapping was overwritten");
+            }
+            // Discovery is a separate, validated inventory: it must not mutate
+            // mapping.xml, force assignments, or require connected gamepads.
+            Type catalogType = a.GetType("TurboTad.InputDiscoveryCatalog", true);
+            Type sourceType = a.GetType("TurboTad.InputSource", true);
+            Type discoveryType = a.GetType("TurboTad.DeviceDiscoveryDialog", true);
+            string scanRoot = Path.Combine(root, "DeviceDiscoveryTest");
+            Directory.CreateDirectory(scanRoot);
+            object catalog = Activator.CreateInstance(catalogType, true);
+            MethodInfo addSource = catalogType.GetMethod("Add",BindingFlags.Instance|BindingFlags.NonPublic);
+            MethodInfo saveCatalog = catalogType.GetMethod("Save",BindingFlags.Instance|BindingFlags.NonPublic);
+            MethodInfo loadCatalog = catalogType.GetMethod("Load",BindingFlags.Static|BindingFlags.NonPublic);
+            MethodInfo xboxAnalogSource = sourceType.GetMethod("XboxAxis",BindingFlags.Static|BindingFlags.NonPublic);
+            MethodInfo xboxButtonSource = sourceType.GetMethod("XboxButton",BindingFlags.Static|BindingFlags.NonPublic);
+            object discoveredLt = xboxAnalogSource.Invoke(null,new object[]{2,4});
+            object discoveredRb = xboxButtonSource.Invoke(null,new object[]{1,9});
+            if(!(bool)addSource.Invoke(catalog,new object[]{discoveredLt}) ||
+               !(bool)addSource.Invoke(catalog,new object[]{discoveredRb}) ||
+               (bool)addSource.Invoke(catalog,new object[]{discoveredLt}))
+                throw new Exception("Discovery did not deduplicate stable source identities");
+            saveCatalog.Invoke(catalog,new object[]{scanRoot});
+            if(File.Exists(Path.Combine(scanRoot,"mapping.xml")))
+                throw new Exception("Discovery overwrote flight bindings");
+            catalog=loadCatalog.Invoke(null,new object[]{scanRoot});
+            if((int)catalogType.GetProperty("Count",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(catalog,null)!=2)
+                throw new Exception("Discovered source inventory did not roundtrip");
+            // Exercise replacement of an existing inventory, not only the first save.
+            saveCatalog.Invoke(catalog,new object[]{scanRoot});
+            string inventoryPath=Path.Combine(scanRoot,"device-discovery.xml");
+            if(Directory.GetFiles(scanRoot,"device-discovery.xml.*.tmp").Length!=0)
+                throw new Exception("Discovery save left a temporary file");
+            object roundtripCatalog=loadCatalog.Invoke(null,new object[]{scanRoot});
+            if((int)catalogType.GetProperty("Count",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(roundtripCatalog,null)!=2)
+                throw new Exception("Replacing an existing discovery inventory lost sources");
+            // Invalid sidecar XML must never create flight bindings or block startup.
+            // A DTD with local entities must be rejected even when no external URL exists.
+            File.WriteAllText(inventoryPath,
+                "<!DOCTYPE DeviceDiscovery [<!ENTITY injected 'xinput:2'>]>" +
+                "<DeviceDiscovery version='1'><Source kind='xaxis' device='&injected;' code='4'/></DeviceDiscovery>");
+            object invalidInventory=loadCatalog.Invoke(null,new object[]{scanRoot});
+            if((int)catalogType.GetProperty("Count",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(invalidInventory,null)!=0 ||
+                catalogType.GetField("LoadIssue",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(invalidInventory)==null)
+                throw new Exception("Discovery loader accepted DTD or kept partial inventory");
+            File.WriteAllText(inventoryPath,"<DeviceDiscovery version='1'>" + new string(' ',70000) + "</DeviceDiscovery>");
+            invalidInventory=loadCatalog.Invoke(null,new object[]{scanRoot});
+            if((int)catalogType.GetProperty("Count",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(invalidInventory,null)!=0 ||
+                catalogType.GetField("LoadIssue",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(invalidInventory)==null)
+                throw new Exception("Oversized discovery inventory was accepted");
+            // Restore the valid inventory for subsequent GUI tests.
+            saveCatalog.Invoke(catalog,new object[]{scanRoot});
+            using(Form wizard=(Form)Activator.CreateInstance(discoveryType,
+                BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic,
+                null,new object[]{emptyDevices,catalog},null))
+            {
+                bool startFound=false,doneFound=false;
+                foreach(Control child in wizard.Controls)
+                    if(child is Button)
+                    {
+                        if(child.Text=="START SCAN")startFound=true;
+                        if(child.Text=="USE RESULTS")doneFound=true;
+                    }
+                if(!startFound||!doneFound)throw new Exception("Discovery scan controls missing");
+            }
+            using(Form f=(Form)Activator.CreateInstance(t,new object[]{scanRoot}))
+            {
+                ComboBox[] discoveredChoices=(ComboBox[])t.GetField("choices",Flags).GetValue(f);
+                AssertSameXboxAxisOptions(discoveredChoices);
+                for(int row=0;row<6;row++)
+                    if(discoveredChoices[row].Items.Count<2 ||
+                       discoveredChoices[row].Items[1].ToString()!="Xbox 3 / LT")
+                        throw new Exception("Discovered Xbox axis not prioritized in row "+row);
+                ComboBox discoveredBoost=(ComboBox)t.GetField("boostChoice",Flags).GetValue(f);
+                if(discoveredBoost.Items.Count<2 || discoveredBoost.Items[1].ToString()!="Xbox 2 / RB")
+                    throw new Exception("Discovered Xbox button not prioritized in Boost");
+                using(Form pair=(Form)Activator.CreateInstance(pairType,
+                    BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic,
+                    null,new object[]{"Thrust up / down","Down","Up",emptyPair,emptyDevices,catalog},null))
+                {
+                    ComboBox neg=(ComboBox)pairType.GetField("negativeChoice",Flags).GetValue(pair);
+                    ComboBox pos=(ComboBox)pairType.GetField("positiveChoice",Flags).GetValue(pair);
+                    if(neg.Items[1].ToString()!="Xbox 2 / RB" ||
+                       pos.Items[1].ToString()!="Xbox 2 / RB")
+                        throw new Exception("Discovered buttons not prioritized in both pair pickers");
+                }
+                f.Close();
+            }
+            Console.WriteLine("Mapper GUI tests passed: manual Xbox bumper pair, legacy/offline migration, backup, keyboard-only Start, digital persistence, neutral T6D7 Stop, device discovery menu priority and persistence.");return 0;
+        }
+        catch(Exception e) {Console.Error.WriteLine(e);return 1;}
+    }
+}

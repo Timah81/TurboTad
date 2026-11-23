@@ -42,6 +42,7 @@ namespace TurboTad
         internal static extern uint joyGetPosEx(uint id, ref Info info);
         [DllImport("winmm.dll", ExactSpelling = true)]
         internal static extern uint joyGetNumDevs();
+        [DllImport("user32.dll")] internal static extern short GetAsyncKeyState(int key);
         [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] internal static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
 
@@ -60,8 +61,51 @@ namespace TurboTad
         }
     }
 
+    // Keep partially typed numbers intact while the live input loop reads Value.
+    // NumericUpDown.Value calls ValidateEditText; its usual validation can turn
+    // the intermediate "5" of "500" into the control's minimum (such as 10).
+    // Only commit/clamp after Enter or when the editor loses focus. The actual
+    // gameplay Minimum/Maximum values remain unchanged.
+    internal sealed class DeferredNumericUpDown : NumericUpDown
+    {
+        private bool committing;
+
+        protected override void ValidateEditText()
+        {
+            if (!committing && UserEdit && ContainsFocus) return;
+            base.ValidateEditText();
+        }
+
+        internal void CommitPendingEdit()
+        {
+            if (committing) return;
+            committing = true;
+            try { base.ValidateEditText(); }
+            finally { committing = false; }
+        }
+
+        protected override void OnLeave(EventArgs e)
+        {
+            CommitPendingEdit();
+            base.OnLeave(e);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                CommitPendingEdit();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                return;
+            }
+            base.OnKeyDown(e);
+        }
+    }
+
     internal sealed class Device
     {
+        internal string Identity { get { return Id + ":" + Caps.Mid + ":" + Caps.Pid + ":" + Caps.Name; } }
         internal uint Id;
         internal Native.Caps Caps;
         internal double[] Values = new double[6];
@@ -97,32 +141,60 @@ namespace TurboTad
     {
         internal Device Device;
         internal int Axis;
+        internal InputSource Xbox;
         private static readonly string[] Names = { "X", "Y", "Z", "R", "U", "V" };
         public override string ToString()
         {
+            if (Xbox != null) return InputNames.Describe(Xbox);
             return Device == null ? "Choose an axis, or click Learn" :
                 "#" + (Device.Id + 1) + " " + Device.Caps.Name + " / " + Names[Axis];
         }
-        internal string Identity { get { return Device.Id + ":" + Axis; } }
+        internal string Identity { get { return Xbox != null ? Xbox.Identity : Device.Id + ":" + Axis; } }
     }
 
     internal sealed class ButtonChoice
     {
         internal Device Device;
         internal int Button;
+        internal int Key;
+        internal InputSource Xbox;
+        internal InputSource Source { get { return Xbox != null ? Xbox : Key != 0 ? InputSource.Key(Key) : Device == null ? null : InputSource.Joystick(Device.Identity, Button, false); } }
         public override string ToString()
         {
-            return Device == null ? "No boost button assigned" :
+            return Xbox != null || Key != 0 ? InputNames.Describe(Source) : Device == null ? "No boost button assigned" :
                 "#" + (Device.Id + 1) + " " + Device.Caps.Name + " / Button " + (Button + 1);
         }
-        internal bool Down { get { return Device != null && Device.Connected && (Device.Buttons & (1U << Button)) != 0; } }
+        internal bool Down
+        {
+            get
+            {
+                if (Xbox != null)
+                {
+                    int player; XInputProbe.State state; string issue;
+                    return InputSource.TryXboxPlayer(Xbox.Device, out player) &&
+                        XInputProbe.TryRead((uint)player, out state, out issue) && XInputProbe.ButtonDown(state, Xbox.Code);
+                }
+                return Key != 0 ? (Native.GetAsyncKeyState(Key) & 0x8000) != 0 :
+                    Device != null && Device.Connected && (Device.Buttons & (1U << Button)) != 0;
+            }
+        }
     }
 
-    public sealed class ControlsWindow : Form
+    public sealed partial class ControlsWindow : Form
     {
         private readonly string root;
         private readonly List<Device> devices = new List<Device>();
+        private readonly XInputProbe.State[] xboxStates = new XInputProbe.State[4];
+        private readonly bool[] xboxConnected = new bool[4];
         private readonly ComboBox[] choices = new ComboBox[6];
+        private readonly ComboBox[] inputModes = new ComboBox[6];
+        private readonly Button[] pairButtons = new Button[6];
+        private readonly AxisBinding[] directionPairs = new AxisBinding[6];
+        private readonly DigitalFocusGate digitalFocus = new DigitalFocusGate();
+        private bool filterDigital, inputForeground;
+        private string mappingLoadError, mappingError;
+        private readonly string[] negativeNames = { "Reverse", "Left", "Down", "Nose down", "Nose left", "Roll left" };
+        private readonly string[] positiveNames = { "Forward", "Right", "Up", "Nose up", "Nose right", "Roll right" };
         private readonly CheckBox[] invert = new CheckBox[6];
         private readonly Label[] meters = new Label[6];
         private readonly Button[] learnButtons = new Button[6];
@@ -131,17 +203,16 @@ namespace TurboTad
         private readonly Label prompt = new Label();
         private readonly Label status = new Label();
         private readonly Button start = new Button();
-        private readonly NumericUpDown deadzone = new NumericUpDown();
+        private readonly NumericUpDown deadzone = new DeferredNumericUpDown();
         private readonly NumericUpDown[] rotationRates = new NumericUpDown[3];
         private readonly NumericUpDown[] movementRates = new NumericUpDown[3];
         private readonly PictureBox brandMark = new PictureBox();
         private System.Drawing.Icon applicationIcon;
-        private decimal hudRight = 420M, hudBottom = 48M;
-        private readonly NumericUpDown boostCooldown = new NumericUpDown();
-        private readonly NumericUpDown topSpeed = new NumericUpDown();
+        private decimal hudRight = 400M, hudBottom = 50M;
+        private readonly NumericUpDown boostCooldown = new DeferredNumericUpDown();
+        private readonly NumericUpDown topSpeed = new DeferredNumericUpDown();
         private readonly ComboBox boostChoice = new ComboBox();
         private readonly Label boostStatus = new Label();
-        private readonly Dictionary<uint, uint> buttonBaseline = new Dictionary<uint, uint>();
         private readonly Stopwatch statusPoll = Stopwatch.StartNew();
         private DateTime lastBoostStatusUtc = DateTime.MinValue;
         private SoundPlayer boostSound;
@@ -151,7 +222,7 @@ namespace TurboTad
         private readonly Stopwatch localBoostCooldown = new Stopwatch();
         private double cooldownAtLastPressSeconds = 10.0;
         private long pendingAudioToken;
-        private bool learningBoost, lastBoostDown;
+        private bool lastBoostDown;
         private long boostToken;
         private readonly string[] labels = { "Forward / reverse", "Strafe right / left", "Thrust up / down", "Pitch up / down", "Yaw right / left", "Roll right / left" };
         private readonly string[] instructions = {
@@ -162,6 +233,12 @@ namespace TurboTad
             "Move the control you want for NOSE RIGHT, then release it.",
             "Move the control you want for ROLL RIGHT, then release it." };
         private int learning = -1;
+        // Windows can expose the same Xbox controller through both XInput and WinMM.
+        // Allow Learn to collect overlapping reports before committing a binding.
+        private AxisChoice pendingLearnCandidate;
+        private double pendingLearnTravel;
+        private DateTime pendingLearnSinceUtc;
+        private const int LearnSettleMilliseconds = 125;
         private bool running;
         private long sequence = DateTime.UtcNow.Ticks;
         private string lastIoError;
@@ -170,7 +247,7 @@ namespace TurboTad
         public ControlsWindow(string modRoot)
         {
             root = modRoot;
-            Text = "TurboTad - 0.3.15B LOCAL BOOST AUDIO";
+            Text = "TurboTad 0.4.0-rc.1";
             string soundPath = Path.Combine(root, "Assets", "TurboTadBoost.wav");
             if (File.Exists(soundPath))
             {
@@ -187,6 +264,7 @@ namespace TurboTad
                 }
             }
             else boostSoundIssue = "TurboTadBoost.wav is missing from the mod's Assets folder.";
+            discovered = InputDiscoveryCatalog.Load(root);
             BuildBetaflightInterface();
             Scan();
             LoadMapping();
@@ -207,7 +285,7 @@ namespace TurboTad
             };
         }
 
-        // Presentation-only palette: input protocol, multiplier units and mapping.xml unchanged.
+        // Shared palette; UIM extends mapping.xml while preserving T6D7 and multiplier units.
         private static readonly Color Canvas = Color.FromArgb(24, 26, 29);
         private static readonly Color Surface = Color.FromArgb(37, 40, 44);
         private static readonly Color SurfaceLight = Color.FromArgb(49, 52, 57);
@@ -216,11 +294,15 @@ namespace TurboTad
         private TabControl dashboardTabs;
         private NumericUpDown mphInput;
         private bool updatingMph;
+        private string activeInputProfilePath;
+        private Label activeProfileLabel;
+        // Unchecked by default: legacy profiles continue to carry only input bindings.
+        private readonly CheckBox includeFlightTuningInProfile = new CheckBox();
         private const decimal BaseMphAtHundred = 22.36936M; // Observed 1000 cm/s swimming cap; estimated, not a live telemetry reading.
 
         private void BuildBetaflightInterface()
         {
-            Text = "TurboTad | Flight tuning";
+            Text = "TurboTad | v0.4.0-rc.1";
             ClientSize = new Size(1120, 800);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -268,7 +350,7 @@ namespace TurboTad
             brandMark.BackColor = Surface;
             Controls.Add(brandMark);
             Label heading = UiLabel(this, "TURBOTAD", 147, 11, 490, 42, 23F, Color.White, true);
-            UiLabel(this, "FLIGHT CONFIGURATOR  /  STABLE BRANCH", 150, 50, 600, 24, 9F, Muted);
+            UiLabel(this, "FLIGHT CONFIGURATOR  /  SUBNAUTICA 2 STABLE", 150, 50, 600, 24, 9F, Muted);
             UiLabel(this, "6DOF  •  ANALOG CONTROL  •  DIRECTIONAL BOOST", 710, 27, 384, 30, 9.5F, Orange, true).TextAlign = ContentAlignment.MiddleRight;
 
             dashboardTabs = new TabControl();
@@ -305,14 +387,14 @@ namespace TurboTad
             string[] movementNames = { "Forward / reverse", "Strafe left / right", "Vertical up / down" };
             for (int i = 0; i < 3; ++i)
             {
-                rotationRates[i] = MakeNumber(rotations, 392, 82 + i * 82, 90, 28, 10M, 1000M, 100M, 10M);
+                rotationRates[i] = MakeNumber(rotations, 392, 82 + i * 82, 90, 28, 10M, 1000M, 100M, 1M);
                 RateSlider slider = new RateSlider(10, 1000, 1, 100);
                 slider.SetBounds(19, 112 + i * 82, 461, 30);
                 rotations.Controls.Add(slider);
                 UiLabel(rotations, rateNames[i] + " rate (%)", 20, 82 + i * 82, 365, 27, 10F, Color.WhiteSmoke);
                 BindSlider(slider, rotationRates[i]);
 
-                movementRates[i] = MakeNumber(movements, 392, 82 + i * 82, 90, 28, 10M, 1000M, 100M, 10M);
+                movementRates[i] = MakeNumber(movements, 392, 82 + i * 82, 90, 28, 10M, 1000M, 100M, 1M);
                 RateSlider movement = new RateSlider(10, 1000, 1, 100);
                 movement.SetBounds(19, 112 + i * 82, 461, 30);
                 movements.Controls.Add(movement);
@@ -328,6 +410,13 @@ namespace TurboTad
             topSpeed.Maximum = 400;
             topSpeed.Increment = 1;
             topSpeed.Value = 100;
+            // Expose the existing speed percentage control beside the estimated mph editor.
+            // Both editors and the slider remain bound to the same TopSpeedScale value.
+            topSpeed.SetBounds(731, 65, 103, 32);
+            StyleNumber(topSpeed);
+            speedPanel.Controls.Add(topSpeed);
+            topSpeed.BringToFront();
+            UiLabel(speedPanel, "speed (%)", 741, 99, 100, 22, 9F, Muted);
             mphInput = MakeNumber(speedPanel, 871, 65, 103, 32,
                 Math.Round(BaseMphAtHundred * .25M, 1), Math.Round(BaseMphAtHundred * 4M, 1),
                 Math.Round(BaseMphAtHundred, 1), .2M);
@@ -335,7 +424,7 @@ namespace TurboTad
             mphInput.BringToFront(); // Keep the editable speed value above any surrounding presentation labels.
             UiLabel(speedPanel, "est. mph", 882, 99, 95, 22, 9F, Muted);
             RateSlider speedSlider = new RateSlider(25, 400, 1, 100);
-            speedSlider.SetBounds(19, 66, 827, 36);
+            speedSlider.SetBounds(19, 66, 686, 36);
             speedPanel.Controls.Add(speedSlider);
             BindSlider(speedSlider, topSpeed);
             topSpeed.ValueChanged += delegate { SyncMphFromPercent(); };
@@ -343,9 +432,11 @@ namespace TurboTad
             SyncMphFromPercent();
 
             UiLabel(input, "INPUT ASSIGNMENTS", 20, 10, 330, 29, 12F, Orange, true);
-            UiLabel(input, "Center sticks, then Learn each axis. Existing mapping is loaded automatically.", 20, 38, 1020, 26, 9.5F, Muted);
+            Button discoverControls = ThemeButton(input, "DISCOVER CONTROLS", 799, 9, 242, 34, false);
+            discoverControls.Click += delegate { BeginDeviceDiscovery(); };
+            UiLabel(input, "Choose Analog or Buttons for each axis. Learn an axis, or assign its two directions.", 20, 38, 1020, 26, 9.5F, Muted);
             UiLabel(input, "AXIS", 24, 71, 190, 24, 9F, Muted, true);
-            UiLabel(input, "DEVICE / JOYSTICK CHANNEL", 227, 71, 448, 24, 9F, Muted, true);
+            UiLabel(input, "TYPE / INPUT SOURCE", 227, 71, 448, 24, 9F, Muted, true);
             UiLabel(input, "INVERT", 758, 71, 70, 24, 9F, Muted, true);
             UiLabel(input, "LIVE", 956, 71, 70, 24, 9F, Muted, true);
             for (int i = 0; i < 6; i++)
@@ -357,7 +448,15 @@ namespace TurboTad
                 input.Controls.Add(stripe);
                 UiLabel(stripe, labels[i], 12, 10, 190, 27, 9.5F, Color.WhiteSmoke);
                 choices[i] = new ComboBox();
-                choices[i].SetBounds(209, 7, 516, 31);
+                choices[i].SetBounds(310, 7, 415, 31);
+                inputModes[i] = new ComboBox(); inputModes[i].SetBounds(209, 7, 94, 31);
+                inputModes[i].DropDownStyle = ComboBoxStyle.DropDownList; StyleCombo(inputModes[i]);
+                inputModes[i].Items.AddRange(new object[] { "Analog", "Buttons" }); inputModes[i].SelectedIndex = 0;
+                stripe.Controls.Add(inputModes[i]); directionPairs[i] = new AxisBinding { Digital = true };
+                pairButtons[i] = ThemeButton(stripe, "ASSIGN DIRECTIONS", 310, 7, 415, 32, false);
+                pairButtons[i].Visible = false;
+                pairButtons[i].Click += delegate { EditDirectionPair(row); };
+                inputModes[i].SelectedIndexChanged += delegate { StopControls(); RefreshInputRow(row); };
                 choices[i].DropDownStyle = ComboBoxStyle.DropDownList;
                 StyleCombo(choices[i]);
                 stripe.Controls.Add(choices[i]);
@@ -380,11 +479,28 @@ namespace TurboTad
             input.Controls.Add(deadzone);
             UiLabel(input, "Deadzone", 22, 490, 112, 28, 9.5F, Color.WhiteSmoke);
             Button rescan = ThemeButton(input, "RESCAN DEVICES", 248, 483, 173, 35, false);
-            rescan.Click += delegate { Scan(); LoadMapping(); };
+            rescan.Click += delegate { SaveMapping(); Scan(); LoadMapping(); };
+            Button saveProfile = ThemeButton(input, "SAVE PROFILE", 435, 483, 157, 35, false);
+            saveProfile.Click += delegate { ExportInputProfile(); };
+            Button loadProfile = ThemeButton(input, "LOAD PROFILE", 606, 483, 157, 35, false);
+            loadProfile.Click += delegate { ImportInputProfile(); };
+            Button saveNewProfile = ThemeButton(input, "SAVE AS NEW...", 435, 526, 157, 33, false);
+            saveNewProfile.Click += delegate { ExportNewInputProfile(); };
+            activeProfileLabel = UiLabel(input, "Active input profile: none", 606, 527, 430, 29, 9F, Muted);
+            activeProfileLabel.AutoEllipsis = true;
+            // Place the opt-in checkbox in the visible profile action row.
+            // The former Xbox diagnostic button is removed from the release-facing GUI.
+            includeFlightTuningInProfile.Text = "Include flight tuning";
+            includeFlightTuningInProfile.Checked = false;
+            includeFlightTuningInProfile.AutoSize = false;
+            includeFlightTuningInProfile.SetBounds(782, 483, 255, 35);
+            includeFlightTuningInProfile.ForeColor = Color.WhiteSmoke;
+            includeFlightTuningInProfile.BackColor = Color.Transparent;
+            input.Controls.Add(includeFlightTuningInProfile);
 
             UiLabel(boostPage, "BOOST & SOUND", 20, 10, 420, 30, 12F, Orange, true);
             Panel boostCard = Section(boostPage, 20, 70, 671, 281, "DIRECTIONAL BOOST", "");
-            UiLabel(boostCard, "Boost button", 22, 72, 150, 26, 10F, Color.WhiteSmoke);
+            UiLabel(boostCard, "Boost button / key", 22, 72, 150, 26, 10F, Color.WhiteSmoke);
             boostChoice.SetBounds(20, 106, 410, 32);
             boostChoice.DropDownStyle = ComboBoxStyle.DropDownList;
             StyleCombo(boostChoice);
@@ -393,7 +509,7 @@ namespace TurboTad
             Button learnBoost = ThemeButton(boostCard, "LEARN", 443, 105, 94, 34, false);
             learnBoost.Click += delegate { BeginLearnBoost(); };
             Button clearBoost = ThemeButton(boostCard, "CLEAR", 548, 105, 100, 34, false);
-            clearBoost.Click += delegate { learningBoost = false; boostChoice.SelectedIndex = 0; };
+            clearBoost.Click += delegate {  boostChoice.SelectedIndex = 0; };
             UiLabel(boostCard, "Cooldown (seconds)", 22, 173, 174, 30, 10F, Color.WhiteSmoke);
             boostCooldown.SetBounds(211, 171, 96, 32);
             boostCooldown.Minimum = 2;
@@ -451,11 +567,11 @@ namespace TurboTad
             footer.Controls.Add(status);
             Button about = ThemeButton(footer, "ABOUT", 824, 17, 95, 48, false);
             about.Click += delegate { MessageBox.Show(this,
-                "TurboTad 0.3.15B  •  Flight Configurator GUI\r\n\r\nSix-axis analog Tadpole controls with linked flight and boost speed.\r\n\r\n" +
+                "TurboTad 0.4.0-rc.1  •  Flight Configurator\r\n\r\nSix-axis analog Tadpole controls with linked flight and boost speed.\r\n\r\n" +
                 "The rotation settings are engine-input multipliers, not calibrated degrees/second. " +
                 "Estimated mph assumes a native 1000 cm/s swim cap observed on the tested build.\r\n\r\n" +
                 "Runs locally. No network telemetry, administrator rights or controller-driver changes.\r\n\r\n" +
-                "WARNING: Breaching the water surface at high speed can launch the Tadpole out of the map. Back up saves and slow down before surfacing.",
+                "WARNING: This mod can break your game. Breaching the water surface at high speed can launch the Tadpole out of the map. Back up your saves and slow down before surfacing.",
                 "About TurboTad", MessageBoxButtons.OK, MessageBoxIcon.Information); };
             start.Text = "START CONTROLS";
             start.SetBounds(932, 16, 168, 49);
@@ -513,7 +629,7 @@ namespace TurboTad
         private NumericUpDown MakeNumber(Control parent, int x, int y, int width, int height,
             decimal minimum, decimal maximum, decimal value, decimal increment)
         {
-            NumericUpDown n = new NumericUpDown();
+            NumericUpDown n = new DeferredNumericUpDown();
             n.Minimum = minimum;
             n.Maximum = maximum;
             n.Increment = increment;
@@ -594,11 +710,37 @@ namespace TurboTad
             return label;
         }
 
+        // Report only newly connected controllers so hotplug updates run once,
+        // rather than rebuilding the dropdown contents on every 16ms UI tick.
+        private bool PollXbox()
+        {
+            bool newlyConnected = false;
+            for (uint player = 0; player < 4; player++)
+            {
+                string issue;
+                XInputProbe.State state;
+                bool wasConnected = xboxConnected[(int)player];
+                xboxConnected[(int)player] = XInputProbe.TryRead(player, out state, out issue);
+                if (xboxConnected[(int)player] && !wasConnected) newlyConnected = true;
+                xboxStates[(int)player] = state;
+            }
+            return newlyConnected;
+        }
+
+        private bool TryXboxState(string device, out XInputProbe.State state)
+        {
+            state = new XInputProbe.State();
+            int player;
+            if (!InputSource.TryXboxPlayer(device, out player) || !xboxConnected[player]) return false;
+            state = xboxStates[player];
+            return true;
+        }
+
         private void Scan()
         {
             StopControls();
             learning = -1;
-            learningBoost = false;
+            
             devices.Clear();
             uint max = Math.Min(Native.joyGetNumDevs(), 16U);
             for (uint id = 0; id < max; id++)
@@ -608,6 +750,7 @@ namespace TurboTad
                 Device d = new Device(); d.Id = id; d.Caps = caps;
                 if (d.Poll()) devices.Add(d);
             }
+            PollXbox();
             for (int i = 0; i < 6; i++)
             {
                 choices[i].Items.Clear();
@@ -617,27 +760,98 @@ namespace TurboTad
                         if (d.Supports(axis)) choices[i].Items.Add(new AxisChoice { Device = d, Axis = axis });
                 choices[i].SelectedIndex = 0;
             }
+            // All six flight dropdowns must expose the same Xbox axes.
+            EnsureXboxAxisChoices(-1);
             boostChoice.Items.Clear();
             boostChoice.Items.Add(new ButtonChoice());
             foreach (Device d in devices)
                 for (int b = 0; b < Math.Min((int)d.Caps.Buttons, 32); b++)
                     boostChoice.Items.Add(new ButtonChoice { Device = d, Button = b });
+            int controllers = 0;
+            for (int player = 0; player < xboxConnected.Length; player++)
+                if (xboxConnected[player])
+                {
+                    controllers++;
+                    for (int b = 0; b < XInputProbe.ButtonBits.Length; b++)
+                        boostChoice.Items.Add(new ButtonChoice { Xbox = InputSource.XboxButton(player, b) });
+                }
             boostChoice.SelectedIndex = 0;
-            prompt.Text = devices.Count == 0 ? "No Windows joystick devices found. Connect both VKBs and click Rescan devices." :
-                devices.Count + " joystick device(s) found. Assign all six controls; use six distinct axes.";
+            PromoteDiscoveredOptions();
+            prompt.Text = devices.Count + " joystick(s), " + controllers +
+                " Xbox controller(s) detected. Xbox sticks and triggers can be assigned.";
+        }
+
+        // Unify Xbox analog choices across all flight rows, including a controller
+        // referenced by a saved profile while unplugged. Never clear a selection:
+        // disconnected bindings stay editable and are restored on reconnect.
+        private void EnsureXboxAxisChoices(int includePlayer)
+        {
+            bool[] known = (bool[])xboxConnected.Clone();
+            if (includePlayer >= 0 && includePlayer < known.Length) known[includePlayer] = true;
+            foreach (ComboBox combo in choices)
+            {
+                foreach (AxisChoice existing in combo.Items)
+                {
+                    int player;
+                    if (existing.Xbox != null &&
+                        InputSource.TryXboxPlayer(existing.Xbox.Device, out player))
+                        known[player] = true;
+                }
+            }
+            for (int player = 0; player < known.Length; player++)
+            {
+                if (!known[player]) continue;
+                for (int axis = 0; axis < XInputProbe.AxisCount; axis++)
+                {
+                    InputSource source = InputSource.XboxAxis(player, axis);
+                    foreach (ComboBox combo in choices)
+                    {
+                        bool present = false;
+                        foreach (AxisChoice existing in combo.Items)
+                            if (existing.Xbox != null && existing.Xbox.Identity == source.Identity)
+                            { present = true; break; }
+                        if (!present) combo.Items.Add(new AxisChoice { Xbox = source });
+                    }
+                }
+            }
+        }
+
+        // Learn can start before a wireless Xbox wakes up. New Xbox axes share
+        // a neutral baseline; existing live axes are baselined in BeginLearn().
+        private void EnsureXboxLearnCandidates(int row)
+        {
+            EnsureXboxAxisChoices(-1);
+            foreach (AxisChoice candidate in choices[row].Items)
+            {
+                int player;
+                if (candidate.Xbox != null &&
+                    InputSource.TryXboxPlayer(candidate.Xbox.Device, out player) &&
+                    xboxConnected[player] && !baseline.ContainsKey(candidate.Identity))
+                    baseline[candidate.Identity] = 0;
+            }
         }
 
         private void BeginLearn(int row)
         {
             StopControls();
-            learningBoost = false;
+            
+            if (inputModes[row].SelectedIndex == 1) { EditDirectionPair(row); return; }
             baseline.Clear();
-            foreach (Device d in devices)
+            pendingLearnCandidate = null;
+            pendingLearnTravel = 0;
+            PollXbox();
+            EnsureXboxLearnCandidates(row);
+            foreach (Device d in devices) d.Poll();
+            foreach (AxisChoice choice in choices[row].Items)
             {
-                d.Poll();
-                if (!d.Connected) continue;
-                for (int a = 0; a < 6; a++)
-                    if (d.Supports(a)) baseline[d.Id + ":" + a] = d.Values[a];
+                if (choice.Xbox != null)
+                {
+                    XInputProbe.State state;
+                    if (TryXboxState(choice.Xbox.Device, out state))
+                        baseline[choice.Identity] = XInputProbe.AxisValue(state, choice.Xbox.Code);
+                }
+                else if (choice.Device != null && choice.Device.Connected && choice.Device.Supports(choice.Axis))
+                    baseline[choice.Identity] = choice.Device.Values[choice.Axis];
             }
             learning = row;
             prompt.Text = instructions[row];
@@ -645,17 +859,15 @@ namespace TurboTad
 
         private void BeginLearnBoost()
         {
-            StopControls();
-            learning = -1;
-            learningBoost = true;
-            buttonBaseline.Clear();
-            foreach (Device d in devices) { d.Poll(); buttonBaseline[d.Id] = d.Buttons; }
-            prompt.Text = "Press and release the joystick button you want for the native ring boost.";
+            StopControls(); learning = -1; 
+            using (InputCaptureDialog dialog = new InputCaptureDialog(devices))
+                if (dialog.ShowDialog(this) == DialogResult.OK) SelectBoostSource(dialog.Selected);
         }
 
         private void StopControls()
         {
             running = false;
+            digitalFocus.Reset();
             boostToken = 0;
             pendingAudioToken = 0;
             start.Text = "START CONTROLS";
@@ -665,16 +877,13 @@ namespace TurboTad
         private bool TryGetAxes(out double[] values)
         {
             values = new double[6];
-            HashSet<string> used = new HashSet<string>();
+            AxisBinding[] bindings = CurrentBindings();
+            if (mappingLoadError != null) { mappingError = mappingLoadError; return false; }
             for (int i = 0; i < 6; i++)
-            {
-                AxisChoice a = choices[i].SelectedItem as AxisChoice;
-                if (a == null || a.Device == null || !a.Device.Connected || !used.Add(a.Identity)) return false;
-                double v = a.Device.Values[a.Axis] * (invert[i].Checked ? -1 : 1);
-                double dz = (double)deadzone.Value;
-                values[i] = Math.Abs(v) <= dz ? 0 : Math.Sign(v) * (Math.Abs(v) - dz) / (1 - dz);
-            }
-            return true;
+                if (!InputMapper.TryEvaluate(bindings[i], new HelperInputFrame(this), (double)deadzone.Value,
+                    out values[i], out mappingError)) return false;
+            ButtonChoice boost = boostChoice.SelectedItem as ButtonChoice;
+            return InputMapper.ValidateSources(bindings, boost == null ? null : boost.Source, out mappingError);
         }
 
         private void StartControls()
@@ -682,18 +891,23 @@ namespace TurboTad
             double[] values;
             if (!TryGetAxes(out values))
             {
-                prompt.Text = "Assign six different axes from connected controllers before starting.";
+                prompt.Text = "Cannot start: " + mappingError + ".";
                 return;
             }
+            if (!InputMapper.AreDigitalSourcesReleased(CurrentBindings(), new HelperInputFrame(this)))
+            { prompt.Text = "Release all direction buttons before starting."; return; }
             for (int i = 0; i < 6; i++)
                 if (Math.Abs(values[i]) > 0.15)
                 {
-                    prompt.Text = "Center all six assigned axes before starting.";
+                    prompt.Text = "Center analog controls and release direction buttons before starting.";
                     return;
                 }
+            ButtonChoice assignedBoost = boostChoice.SelectedItem as ButtonChoice;
+            if (assignedBoost != null && assignedBoost.Down) { prompt.Text = "Release boost before starting."; return; }
+            digitalFocus.Reset();
             SaveMapping();
             learning = -1;
-            learningBoost = false;
+            
             running = true;
             start.Text = "STOP CONTROLS";
             prompt.Text = "Ready. Return to Subnautica 2 and pilot a powered Tadpole. Closing this window stops the controls.";
@@ -702,67 +916,86 @@ namespace TurboTad
         private void TickControls()
         {
             foreach (Device d in devices) d.Poll();
-            if (learningBoost)
+            bool newXboxConnected = PollXbox();
+            if (newXboxConnected)
             {
-                ButtonChoice winner = null;
-                foreach (ButtonChoice b in boostChoice.Items)
-                {
-                    uint previous;
-                    if (b.Device != null && b.Device.Connected && b.Down &&
-                        buttonBaseline.TryGetValue(b.Device.Id, out previous) &&
-                        (previous & (1U << b.Button)) == 0) { winner = b; break; }
-                }
-                foreach (Device d in devices) buttonBaseline[d.Id] = d.Buttons;
-                if (winner != null)
-                {
-                    learningBoost = false;
-                    boostChoice.SelectedItem = winner;
-                    prompt.Text = "Boost button assigned. One press requests one native burst; holding will not repeat.";
-                }
+                // Hotplug must update every axis dropdown, not just the active Learn row.
+                if (learning >= 0) EnsureXboxLearnCandidates(learning);
+                else EnsureXboxAxisChoices(-1);
             }
             if (learning >= 0)
             {
                 AxisChoice winner = null;
                 double best = 0.55;
-                bool haveVkb = devices.Exists(delegate(Device d) {
-                    return d.Caps.Name != null && d.Caps.Name.IndexOf("VKB", StringComparison.OrdinalIgnoreCase) >= 0;
-                });
                 foreach (AxisChoice a in choices[learning].Items)
                 {
-                    if (a.Device == null || !a.Device.Connected) continue;
-                    if (haveVkb && a.Device.Caps.Name.IndexOf("VKB", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    double current;
+                    if (a.Xbox != null)
+                    {
+                        XInputProbe.State state;
+                        if (!TryXboxState(a.Xbox.Device, out state)) continue;
+                        current = XInputProbe.AxisValue(state, a.Xbox.Code);
+                    }
+                    else
+                    {
+                        if (a.Device == null || !a.Device.Connected) continue;
+                        current = a.Device.Values[a.Axis];
+                    }
                     double center;
                     if (!baseline.TryGetValue(a.Identity, out center)) continue;
-                    double travel = Math.Abs(a.Device.Values[a.Axis] - center);
-                    if (travel > best) { best = travel; winner = a; }
+                    double travel = Math.Abs(current - center);
+                    if (InputMapper.PreferLearnCandidate(a.Xbox != null, travel,
+                            winner != null && winner.Xbox != null, best))
+                    { best = travel; winner = a; }
                 }
                 if (winner != null)
                 {
+                    if (pendingLearnCandidate == null) pendingLearnSinceUtc = DateTime.UtcNow;
+                    if (InputMapper.PreferLearnCandidate(winner.Xbox != null, best,
+                            pendingLearnCandidate != null && pendingLearnCandidate.Xbox != null, pendingLearnTravel))
+                    {
+                        pendingLearnCandidate = winner;
+                        pendingLearnTravel = best;
+                    }
+                }
+                // Keep a quick flick, but give XInput time to win over the
+                // legacy WinMM report for the same physical stick.
+                if (pendingLearnCandidate != null &&
+                    (DateTime.UtcNow - pendingLearnSinceUtc).TotalMilliseconds >= LearnSettleMilliseconds)
+                {
                     int row = learning;
                     learning = -1;
-                    choices[row].SelectedItem = winner;
-                    invert[row].Checked = winner.Device.Values[winner.Axis] < 0;
+                    choices[row].SelectedItem = pendingLearnCandidate;
+                    pendingLearnCandidate = null;
+                    pendingLearnTravel = 0;
+                    // Learning identifies an axis only. Inversion is explicitly user-controlled.
                     prompt.Text = labels[row] + " assigned. Release the control, then Learn the next row.";
                 }
             }
+            bool foreground = Native.IsGameForeground();
+            inputForeground = foreground; filterDigital = true;
             double[] values;
             bool mapped = TryGetAxes(out values);
+            filterDigital = false;
+            // Per-row preview permits Xbox Learn testing before all six axes are assigned.
+            AxisBinding[] preview = CurrentBindings();
+            HelperInputFrame previewFrame = new HelperInputFrame(this);
             for (int i = 0; i < 6; i++)
             {
-                AxisChoice a = choices[i].SelectedItem as AxisChoice;
-                meters[i].Text = a != null && a.Device != null && a.Device.Connected ?
-                    (a.Device.Values[a.Axis] * (invert[i].Checked ? -1 : 1)).ToString("+0.00;-0.00;0.00", CultureInfo.InvariantCulture) : "--";
+                double value; string error;
+                bool valid = InputMapper.TryEvaluate(preview[i], previewFrame, (double)deadzone.Value, out value, out error);
+                meters[i].Text = valid ? value.ToString("+0.00;-0.00;0.00", CultureInfo.InvariantCulture) : "--";
             }
             if (running && !mapped)
             {
                 StopControls();
                 prompt.Text = "Controls stopped: a controller disconnected or a mapping is invalid. Reconnect and start again.";
             }
-            bool foreground = Native.IsGameForeground();
             bool active = running && mapped && foreground;
             int mode = running && mapped ? (foreground ? 1 : 2) : 0;
             ButtonChoice boostButton = boostChoice.SelectedItem as ButtonChoice;
-            bool boostDown = boostButton != null && boostButton.Down;
+            bool boostDown = boostButton != null && boostButton.Source != null &&
+                digitalFocus.Filter(boostButton.Source.Identity, boostButton.Down, active);
             // Exactly one activation per press, gated by the same user-configured cooldown
             // sent to the game in Publish(). Holding the button or pressing during cooldown
             // cannot send another token or replay the sound.
@@ -791,9 +1024,9 @@ namespace TurboTad
             }
             UpdateBoostStatus();
             status.Text = lastIoError != null ? "INPUT FILE ERROR: " + lastIoError :
-                active ? "SENDING ANALOG INPUT - Alt-Tab pauses input; Stop restores stock auto-leveling." :
+                active ? "SENDING FLIGHT INPUT - Alt-Tab pauses input; Stop restores stock auto-leveling." :
                 running ? "INPUT PAUSED - waiting for game focus; free-flight auto-leveling stays disabled." :
-                "STOPPED - assign your axes and click Start controls.";
+                "STOPPED - assign all six axes and click Start controls.";
         }
 
         private void Publish(int mode, double[] values)
@@ -880,15 +1113,15 @@ namespace TurboTad
                 Label rightLabel = new Label(); rightLabel.Text = "From right edge"; rightLabel.SetBounds(18, 70, 220, 28);
                 Label bottomLabel = new Label(); bottomLabel.Text = "From bottom edge"; bottomLabel.SetBounds(18, 110, 220, 28);
                 dialog.Controls.Add(rightLabel); dialog.Controls.Add(bottomLabel);
-                NumericUpDown right = new NumericUpDown(); right.SetBounds(290, 66, 140, 30);
+                NumericUpDown right = new DeferredNumericUpDown(); right.SetBounds(290, 66, 140, 30);
                 right.Minimum = 0; right.Maximum = 2000; right.Increment = 10; right.Value = hudRight;
-                NumericUpDown bottom = new NumericUpDown(); bottom.SetBounds(290, 106, 140, 30);
+                NumericUpDown bottom = new DeferredNumericUpDown(); bottom.SetBounds(290, 106, 140, 30);
                 bottom.Minimum = 0; bottom.Maximum = 2000; bottom.Increment = 10; bottom.Value = hudBottom;
                 right.ValueChanged += delegate { hudRight = right.Value; };
                 bottom.ValueChanged += delegate { hudBottom = bottom.Value; };
                 dialog.Controls.Add(right); dialog.Controls.Add(bottom);
                 Button reset = new Button(); reset.Text = "Reset position"; reset.SetBounds(18, 158, 155, 34);
-                reset.Click += delegate { right.Value = 420; bottom.Value = 48; };
+                reset.Click += delegate { right.Value = 400; bottom.Value = 50; };
                 Button done = new Button(); done.Text = "Done"; done.SetBounds(290, 158, 140, 34);
                 done.DialogResult = DialogResult.OK; dialog.AcceptButton = done; dialog.CancelButton = done;
                 dialog.Controls.Add(reset); dialog.Controls.Add(done);
@@ -901,6 +1134,7 @@ namespace TurboTad
 
         private void SaveMapping()
         {
+            if (mappingLoadError != null) { prompt.Text = "Mapping preserved: " + mappingLoadError; return; }
             try
             {
                 XmlDocument doc = new XmlDocument();
@@ -939,7 +1173,10 @@ namespace TurboTad
                     item.SetAttribute("invert", invert[i].Checked ? "1" : "0");
                     top.AppendChild(item);
                 }
+                top.AppendChild(WriteUniversalBindings(doc));
                 string mapping = Path.Combine(root, "mapping.xml");
+                string backup = Path.Combine(root, "mapping.before-uim.xml");
+                if (File.Exists(mapping) && !File.Exists(backup)) File.Copy(mapping, backup);
                 string pending = Path.Combine(root, "mapping.tmp.xml");
                 doc.Save(pending);
                 if (File.Exists(mapping)) File.Replace(pending, mapping, null);
@@ -954,6 +1191,7 @@ namespace TurboTad
             if (!File.Exists(path)) return;
             try
             {
+                mappingLoadError = null;
                 XmlReaderSettings xmlSettings = new XmlReaderSettings();
                 xmlSettings.DtdProcessing = DtdProcessing.Prohibit;
                 xmlSettings.XmlResolver = null;
@@ -981,39 +1219,10 @@ namespace TurboTad
                         rotationRates[i].Value = Math.Max(rotationRates[i].Minimum, Math.Min(rotationRates[i].Maximum, dz));
                 if (decimal.TryParse(top.GetAttribute("boostCooldown"), NumberStyles.Number, CultureInfo.InvariantCulture, out dz))
                     boostCooldown.Value = Math.Max(boostCooldown.Minimum, Math.Min(boostCooldown.Maximum, dz));
-                XmlElement boostItem = top.SelectSingleNode("BoostButton") as XmlElement;
-                if (boostItem != null)
-                {
-                    uint id, mid, pid; int button;
-                    if (uint.TryParse(boostItem.GetAttribute("id"), out id) &&
-                        uint.TryParse(boostItem.GetAttribute("mid"), out mid) &&
-                        uint.TryParse(boostItem.GetAttribute("pid"), out pid) &&
-                        int.TryParse(boostItem.GetAttribute("button"), out button) && button >= 0 && button < 32)
-                        foreach (ButtonChoice b in boostChoice.Items)
-                            if (b.Device != null && b.Device.Id == id && b.Device.Caps.Mid == mid && b.Device.Caps.Pid == pid &&
-                                b.Device.Caps.Name == boostItem.GetAttribute("name") && b.Button == button)
-                            { boostChoice.SelectedItem = b; break; }
-                }
-                foreach (XmlElement item in top.SelectNodes("Axis"))
-                {
-                    int row, axis; uint id, mid, pid;
-                    if (!int.TryParse(item.GetAttribute("row"), out row) || row < 0 || row > 5 ||
-                        !int.TryParse(item.GetAttribute("axis"), out axis) || axis < 0 || axis > 5 ||
-                        !uint.TryParse(item.GetAttribute("id"), out id) ||
-                        !uint.TryParse(item.GetAttribute("mid"), out mid) ||
-                        !uint.TryParse(item.GetAttribute("pid"), out pid)) continue;
-                    foreach (AxisChoice a in choices[row].Items)
-                        if (a.Device != null && a.Device.Id == id && a.Axis == axis &&
-                            a.Device.Caps.Mid == mid && a.Device.Caps.Pid == pid &&
-                            a.Device.Caps.Name == item.GetAttribute("name"))
-                        {
-                            choices[row].SelectedItem = a;
-                            invert[row].Checked = item.GetAttribute("invert") == "1";
-                            break;
-                        }
-                }
+                LoadLegacyBindings(top);
+                LoadStoredUniversalBindings(top["UniversalInput"]);
             }
-            catch (Exception e) { prompt.Text = "Saved mapping could not be loaded: " + e.Message; }
+            catch (Exception e) { mappingLoadError = e.Message; prompt.Text = "Saved mapping preserved; could not load: " + e.Message; }
         }
 
         [STAThread]

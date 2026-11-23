@@ -1,82 +1,80 @@
 # TurboTad
 
-**6-degree-of-freedom Tadpole flight controls for Subnautica 2 (Windows, stable game branch).** Fly with proportional pitch, yaw, roll, forward/reverse, left/right, and up/down control. The project uses a Windows C# controls application and UE4SS Lua scripts.
+**Fly It Like You Stole It!** A six-degree-of-freedom flight-control mod for the **Subnautica 2 Tadpole** on Windows. Fly inverted, roll, pitch, yaw, strafe, boost, and customize how the Tadpole handles.
 
-> **PROJECT STATUS — NOT PUBLICLY RELEASED YET.** The repository is private and contains development **source code**, not a finished installer. A separate release candidate has been tested, but final public-release checks are still open.
+> **Download status (November 22, 2026):** TurboTad v0.4.0 has been uploaded to Nexus Mods, but its Windows executable is awaiting Nexus's manual security review. The ZIP is not publicly downloadable until Nexus clears it.
 >
-> **Don't click the green `Code → Download ZIP` button expecting to install TurboTad.** That ZIP is a *source-code snapshot*, and normally does not contain the compiled `TurboTad.Controls.exe` or UE4SS.
+> **Installing TurboTad?** Do **not** use GitHub's green **Code → Download ZIP** button. That downloads source code, not the ready-to-install Windows application.
 
-## Start here — what are you trying to do?
+## Start here
 
-| I want to... | Go here | What you'll find |
-| --- | --- | --- |
-| **Download and play TurboTad** | **[Releases](https://github.com/Timah81/TurboTad/releases)** | This is where a ready-to-install ZIP **will** appear after release validation. **No GitHub Release has been published yet.** |
-| **Find the baseline source** | **[main branch](https://github.com/Timah81/TurboTad/tree/main)** | The saved source baseline. **Not** a compiled installer or necessarily the newest development work. |
-| **See newer controller work** | **[Universal Input Mapper branch](https://github.com/Timah81/TurboTad/tree/feature/universal-input-mapper)** | Ongoing input-mapping development; don't assume it is release-tested. |
-| **Review proposed fixes** | **[Pull requests](https://github.com/Timah81/TurboTad/pulls)** | Proposed code changes that may or may not be merged. |
-| **See all development branches** | **[Branches](https://github.com/Timah81/TurboTad/branches)** | Separate copies of the project used to develop or test changes without altering `main`. |
-
-**Rule of thumb:** **Releases = downloads for players. Branches = code being worked on.** A branch with more commits is not automatically better or safer.
-
-## What the current branches mean
-
-| Branch | Purpose | Is this a public release? |
-| --- | --- | --- |
-| [`main`](https://github.com/Timah81/TurboTad/tree/main) | Preserved source baseline, including an accepted neutral-boost fix | **No** |
-| [`feature/universal-input-mapper`](https://github.com/Timah81/TurboTad/tree/feature/universal-input-mapper) | Development of unified analog/digital/controller mapping | **No** |
-| [`feature/device-discovery`](https://github.com/Timah81/TurboTad/tree/feature/device-discovery) | Input-device discovery changes | **No** |
-| [`audit/discovery-xml-hardening`](https://github.com/Timah81/TurboTad/tree/audit/discovery-xml-hardening) | Review/testing of discovery XML parsing safeguards | **No** |
-| [`audit/release-lua-logging-cleanup`](https://github.com/Timah81/TurboTad/tree/audit/release-lua-logging-cleanup) | Review/testing of diagnostic Lua logging cleanup | **No** |
-| [`experiment/vertical-ascend-suppression`](https://github.com/Timah81/TurboTad/tree/experiment/vertical-ascend-suppression) | Isolated experiment, not approved release behavior | **No** |
-
-### GitHub words in plain English
-
-- **Branch:** a separate work area. Switching branches changes which *source files* you are looking at; it does not install anything on your PC.
-- **Commit:** a saved code checkpoint. Clicking one shows what changed.
-- **Ahead / Behind:** how many commits differ from `main`; **not** a quality, safety, or release-readiness score.
-- **Pull request (PR):** a proposal to combine one branch with another. It is not automatically accepted or merged.
-- **Release:** a named, published version. For TurboTad, the goal is a clearly labeled ready-to-install ZIP in its **Assets** section.
-
-## If you are giving TurboTad to another AI agent for an audit
-
-1. Decide **which branch** or exact commit you want audited. Don't just ask for “the newest code” — the branches have different purposes.
-2. Open that branch, then use **Code → Download ZIP** to supply its **source** to the agent, or give an agent with GitHub access the branch/commit link.
-3. For a *runtime, packaging or install* audit, also provide the separately verified runtime release-candidate ZIP. Source ZIPs by themselves do not establish what was compiled or tested in the game.
-4. Ask the agent to report the branch and commit hash it actually inspected, and to distinguish static review from compilation and in-game testing.
-
-**Important:** This repository is currently private. Someone without access cannot open these links, even if you send them the URL.
-
-## What TurboTad does
-
-- Proportional inverted/6DOF Tadpole flight
-- Adjustable movement response, rotational control and top speed
-- Directional boost, configurable cooldown and in-game HUD
-- Windows control/mapping GUI
-- Optional local, user-provided WAV sound for boost
-
-The newer Universal Input Mapper is under active development on its own branch; don't treat every adapter or mixed-device scenario as validated. The Windows helper, UE4SS version, and game build all matter for compatibility.
-
-## Source folders (for developers)
-
-| Path | What it is |
+| I want to… | Go here |
 | --- | --- |
-| `Scripts/` | In-game UE4SS Lua flight, boost, controller and HUD code |
-| `Source/` | Windows C# helper, settings GUI and source tests |
-| `Assets/` | GUI icons and images |
-| `BuildAndVerify.cmd` / `BuildAndVerify.ps1` | Compile/test helper source in an isolated temporary location; **does not install or certify a release** |
-| `TurboTad.cmd` | Launcher for an **installed** mod layout; not a complete installer by itself |
-| `LICENSE` | Project's license text |
+| **Download the mod** | The **TurboTad page on Nexus Mods** (download pending Nexus review) |
+| **Install TurboTad** | [Installation steps](#installation) below |
+| **Understand who made it** | [How TurboTad was made](HOW-IT-WAS-MADE.md) |
+| **Inspect or build the source** | [Source code map](#source-code-map) and [Build verification](#build-and-verification) |
+| **Report a problem** | The Nexus mod's Posts/Bugs sections, once the page is published |
 
-**UE4SS is a separate dependency**, not included in this repository. Development used the Subnautica 2 stable branch and UE4SS 3.0.1 Beta; compatibility with other builds is not established.
+**For players:** Nexus hosts the installable ZIP; this repository hosts source code, documentation, and build evidence. **For developers:** the `main` branch represents the integrated v0.4.0 source. Other feature, audit, and experiment branches are development history, not separate player downloads.
 
-## Safety and distribution
+## Features
 
-**WARNING: High-speed surface breaches can launch the Tadpole out of the game world and break your gameplay session. Back up your saves and slow down before surfacing.** Boost and extreme speed settings can also cause collisions. No automatic surface limiter is promised.
+- True 6DoF Tadpole flight: pitch, yaw, roll, forward/reverse, left/right strafe, and ship-relative vertical motion.
+- Inverted flight, adjustable rotation/movement response and top speed, and scaled acceleration.
+- Directional boost, optional in-game HUD and user-supplied WAV boost sound.
+- Windows controls GUI supporting compatible Xbox/XInput and flight-stick/Windows joystick inputs.
+- Custom mappings and saved profiles; optionally save flight tuning with controller bindings.
 
-Do not publish private controller mappings, saved games, logs, user-recorded game sounds, or bundled UE4SS binaries as if they were TurboTad assets. Users may supply their own WAV files. See [LICENSE](LICENSE); third-party software and game assets retain their own rights. AI tools have assisted development; any public mod page should disclose their actual use accurately.
+## Requirements
 
----
+- Subnautica 2 **stable branch** on Windows.
+- [UE4SS for Subnautica 2](https://www.nexusmods.com/subnautica2/mods/36), installed separately. Tested with **UE4SS v3.0.1 Beta** (build `d7e7826d`).
+- Microsoft **.NET Framework 4.x** runtime for the Windows controls application.
 
-**For players:** wait for a validated ZIP under **[Releases](https://github.com/Timah81/TurboTad/releases)**.
+Other game builds, Steam Deck/Proton, multiplayer, and combinations of competing input/movement mods have **not** been certified.
 
-**For developers and auditors:** use the exact **branch + commit hash** for the code you intend to inspect.
+## Installation
+
+1. **Back up your Subnautica 2 saves.** When updating, also back up any existing `ue4ss/Mods/TurboTad/` folder, including your mappings, profiles, and WAV files.
+2. Install a compatible **UE4SS** separately.
+3. Extract the **complete TurboTad ZIP from Nexus** into `Subnautica2/Binaries/Win64/`. The installed mod should end up at `Subnautica2/Binaries/Win64/ue4ss/Mods/TurboTad/`—not inside an extra nested TurboTad folder.
+4. Run `TurboTad.cmd` from `Binaries/Win64/`, or run `ue4ss/Mods/TurboTad/TurboTad.Controls.exe` directly.
+5. Configure your inputs in the Windows GUI, click **START CONTROLS**, then enter the Tadpole in-game.
+
+**Tip:** Create a desktop shortcut to `TurboTad.Controls.exe` or pin the running application to your taskbar to avoid navigating to the game folder each time.
+
+The ZIP contains no user profiles or WAV files; they are created or added locally as needed. To remove TurboTad, close the game and helper, back up personal settings, delete only `ue4ss/Mods/TurboTad/` and the optional `TurboTad.cmd` launcher. Leave UE4SS and game files alone.
+
+## Safety
+
+**WARNING: This mod can break your gameplay session. High-speed surface breaches can launch the Tadpole out of the map. Back up saves and slow down before surfacing.** The displayed mph value is an estimate, not calibrated telemetry.
+
+## Source code map
+
+| Location | Purpose |
+| --- | --- |
+| [`Scripts/`](Scripts/) | UE4SS Lua flight control, boost, input and HUD |
+| [`Source/`](Source/) | Windows C# controls application and automated tests |
+| [`Assets/`](Assets/) | Application icon and logo |
+| [`BuildAndVerify.ps1`](BuildAndVerify.ps1) | Windows build and isolated tests; not a game installer |
+| [`.github/workflows/`](.github/workflows/) | Automated Windows build/test/package workflow |
+| [`Diagnostics/`](Diagnostics/) | Historical development probes; **not** part of the player ZIP |
+| [`HOW-IT-WAS-MADE.md`](HOW-IT-WAS-MADE.md) | Human direction, AI contributions, audits and testing limitations |
+| [`LICENSE`](LICENSE) | MIT license for original project code/documentation |
+
+## Build and verification
+
+The **v0.4.0 Nexus upload** was assembled from the tested GitHub Actions build for source commit [`ee0efc405e6c…`](https://github.com/Timah81/TurboTad/commit/ee0efc405e6ce68dc0c45ecfc2b28bd66b47c5f5), including the final Lua exception-logging fix.
+
+- [Windows CI run — successful](https://github.com/Timah81/TurboTad/actions/runs/45071566524)
+- **Nexus ZIP SHA-256:** `04287a30142ef6d422d7841f1d33824a782e84f37227970ed9f87413e6a63b22`
+- The runtime ZIP contains **13 files**: the Windows helper and UE4SS mod files, launcher, required assets, and license. It does **not** include UE4SS itself, personal mappings, diagnostic probes, or unrelated mods.
+
+Source reviews, CI, and the creator's in-game testing are evidence, **not a guarantee** of security or compatibility on every machine. Rebuilding from source may not produce byte-identical Windows binaries due to compiler metadata.
+
+## Credits and rights
+
+**Developed with AI under human direction.** The creator designed and directed the project, performed hands-on testing, and made acceptance/release decisions. ChatGPT and DeepSeek contributed substantially to coding and technical research; Claude, ChatGPT, and other tools contributed reviews. Read [How TurboTad was made](HOW-IT-WAS-MADE.md) for details.
+
+Original project code/documentation is MIT-licensed; see [LICENSE](LICENSE). Subnautica 2, Unreal Engine, UE4SS, Windows, .NET, and third-party materials retain their own rights. TurboTad is an unofficial fan project, not endorsed by the game's creators.

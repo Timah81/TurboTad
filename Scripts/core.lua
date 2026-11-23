@@ -24,7 +24,7 @@ function M.parse(line, now)
         if not finite(v) or v < -1 or v > 1 then return nil end
         axes[i] = v
     end
-    local settings={PitchScale=1,YawScale=1,RollScale=1,ForwardScale=1,StrafeScale=1,VerticalScale=1,BoostCooldownSeconds=10,HudRight=420,HudBottom=48}
+    local settings={PitchScale=1,YawScale=1,RollScale=1,ForwardScale=1,StrafeScale=1,VerticalScale=1,BoostCooldownSeconds=10,HudRight=400,HudBottom=50}
     local boost=0
     if extended then
         local pitch,yaw,roll=tonumber(words[11]),tonumber(words[12]),tonumber(words[13])
@@ -41,7 +41,7 @@ function M.parse(line, now)
         for _,v in ipairs({forward or false,strafe or false,vertical or false}) do
             if not finite(v) or v<0.1 or v>10 then return nil end
         end
-        settings={PitchScale=pitch,YawScale=yaw,RollScale=roll,ForwardScale=forward,StrafeScale=strafe,VerticalScale=vertical,BoostCooldownSeconds=cooldown,HudRight=420,HudBottom=48}
+        settings={PitchScale=pitch,YawScale=yaw,RollScale=roll,ForwardScale=forward,StrafeScale=strafe,VerticalScale=vertical,BoostCooldownSeconds=cooldown,HudRight=400,HudBottom=50}
     end
     if screen then
         local right,bottom=tonumber(words[19]),tonumber(words[20])

@@ -29,6 +29,12 @@ local function slate(color) return {SpecifiedColor=color,ColorUseRule=0} end
 
 function M.new(env)
     local self={seekAge=1,paintAge=0,failed=false,pulseAge=nil,pulseScale=1,pulseEnabled=true}
+    local logged={}
+    local function reportOnce(key,message,err)
+        if logged[key] then return end
+        logged[key]=true
+        print('[TurboTad] HUD '..message..': '..tostring(err))
+    end
     -- Called only after boost.lua confirms the velocity write succeeded.
     -- A pulse is retained until the HUD becomes visible, even if it attaches late.
     function self:pulse()
@@ -42,6 +48,7 @@ function M.new(env)
             -- Optional effect: never let a render-transform failure disable the HUD.
             local ok,err=pcall(function() self.root:SetRenderScale({X=scale,Y=scale}) end)
             if not ok then
+                reportOnce('pulse-scale','pulse effect disabled',err)
                 self.pulseEnabled=false
                 self.pulseAge=nil
                 return
@@ -66,6 +73,7 @@ function M.new(env)
             pcall(function() self.root:SetVisibility(1) end)
             local ok,err=pcall(function() self.root:RemoveFromParent() end)
             if not ok then
+                reportOnce('cleanup','detach failed',err)
                 return false
             end
         end
@@ -132,6 +140,7 @@ function M.new(env)
             box:SetRenderScale({X=1,Y=1})
         end)
         self.pulseEnabled=pulseOK
+        if not pulseOK then reportOnce('pulse-init','pulse initialization unavailable',pulseErr) end
         if isCanvas then
             self.slot=host:AddChildToCanvas(box)
             self.slot:SetAnchors({Minimum={X=1,Y=1},Maximum={X=1,Y=1}})
@@ -154,7 +163,7 @@ function M.new(env)
         end
     end
     local function position(state)
-        local right,bottom=state.right or 420,state.bottom or 48
+        local right,bottom=state.right or 400,state.bottom or 50
         if self.lastRight==right and self.lastBottom==bottom then return end
         if self.isCanvas then self.slot:SetPosition({X=-right,Y=-bottom})
         else self.slot:SetPadding({Left=0,Top=0,Right=right,Bottom=bottom}) end
@@ -208,6 +217,7 @@ function M.new(env)
             self.lastError=unavailable
         end)
         if not ok then
+            reportOnce('update','render/update failed; disabling HUD',err)
             self.failed=true;self:cleanup()
         end
     end

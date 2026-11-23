@@ -9,6 +9,29 @@ local function same(a,b)
     return ok and result
 end
 
+-- Approximate calibration from four measured swim sweeps (30-36 fps).
+-- Physical spin is estimated from GUI rate, not assumed proportional to it.
+local function estimatedSpinP90(rate)
+    if rate<=1 then return 0.6*rate end
+    if rate<=4 then return 0.6+(rate-1)*0.5 end
+    if rate<=7 then return 2.1+(rate-4)*0.4 end
+    return 3.3+(rate-7)*(1.1/3)
+end
+
+local function calibratedAcceleration(originalAcceleration,originalSpeed,settings)
+    local speed=originalSpeed*(settings.TopSpeedScale or 1)
+    local rotation=math.max(settings.PitchScale or 1,settings.YawScale or 1,settings.RollScale or 1)
+    local omega=estimatedSpinP90(rotation)
+    -- Direction-change budget plus extra high-speed headroom.
+    -- Approximate anchors: 50/100->stock; 171/700->6500; 200/400->5000;
+    -- 400/1000->25500 cm/s^2. Higher FPS remains to be validated.
+    local speedFraction=math.min(1,math.max(0,speed/4000))
+    local margin=1.10+0.30*(speedFraction^4)
+    local required=speed*math.sqrt(1+omega*omega)*margin
+    local rounded=math.floor(required/500+0.5)*500
+    return math.max(originalAcceleration,math.min(50000,rounded))
+end
+
 function M.new(core,config)
     local self={target=nil,ownerPC=nil,changes={},parked={},injecting=false,restoreErrors={}}
 
@@ -37,6 +60,7 @@ function M.new(core,config)
     function self:release(keepOrientation)
         local previous=self.target
         self.target=nil;self.ownerPC=nil;self.injecting=false
+        self.accelSettingsKey=nil;self.accelTarget=nil
         if keepOrientation and valid(previous) and not self:attached(previous) then
             local retained,other={},{}
             for _,change in ipairs(self.changes) do
@@ -130,6 +154,21 @@ function M.new(core,config)
                 local camera=pawn.FirstPersonCamera
                 if not valid(camera) then error('Tadpole camera unavailable') end
                 save(camera,'bUsePawnControlRotation',false)
+                -- Tadpole-only fixed acceleration override; release() restores the original.
+                local acceleration=config.TadpoleMaxSwimAcceleration
+                if acceleration~=nil then
+                    if type(acceleration)~='number' or acceleration~=acceleration
+                        or acceleration<=0 or acceleration>50000 then
+                        error('Invalid Tadpole swim acceleration override')
+                    end
+                    local movement=pawn.CharacterMovement
+                    if not valid(movement) then error('Tadpole movement component unavailable') end
+                    local baseline=tonumber(movement.MaxSwimAcceleration)
+                    if not baseline or baseline<=0 or baseline==math.huge then
+                        error('Native swim acceleration unavailable')
+                    end
+                    save(movement,'MaxSwimAcceleration',acceleration)
+                end
             end
             -- Chassis changes may reapply these rates; keep the active instance unlocked.
             pawn.RollCorrectionRate=0
@@ -156,11 +195,40 @@ function M.new(core,config)
                 end
                 save(cm,'MaxSwimSpeed',original*speedScale)
             end
+            if config.TadpoleDynamicSwimAcceleration then
+                if not valid(cm) then error('Tadpole movement component unavailable') end
+                local accelChange=nil
+                for _,change in ipairs(self.changes) do
+                    if change.name=='MaxSwimAcceleration' and same(change.obj,cm) then
+                        accelChange=change;break
+                    end
+                end
+                if not accelChange then error('Saved native swim acceleration unavailable') end
+                local originalAcceleration=tonumber(accelChange.original)
+                local originalSpeed=tonumber(speedChange and speedChange.original or cm.MaxSwimSpeed)
+                if not originalAcceleration or originalAcceleration<=0
+                    or not originalSpeed or originalSpeed<=0 then
+                    error('Native Tadpole swim physics unavailable')
+                end
+                -- Compute only when flight settings/cap change; use existing tick
+                -- to reassert only if a conflicting writer changed acceleration.
+                local key=string.format('%.3f/%.3f/%.3f/%.3f/%.3f',
+                    originalSpeed,speedScale,settings.PitchScale or 1,
+                    settings.YawScale or 1,settings.RollScale or 1)
+                if key~=self.accelSettingsKey then
+                    self.accelTarget=calibratedAcceleration(originalAcceleration,originalSpeed,settings)
+                    self.accelSettingsKey=key
+                end
+                if tonumber(cm.MaxSwimAcceleration)~=self.accelTarget then
+                    cm.MaxSwimAcceleration=self.accelTarget
+                end
+            end
             local world=core.world_thrust(axes,pawn:GetActorForwardVector(),
                 pawn:GetActorRightVector(),pawn:GetActorUpVector(),settings.ForwardScale,settings.StrafeScale,settings.VerticalScale)
             pawn:ConsumeMovementInputVector()
-            pawn:AddMovementInput(world,1,false)
+            -- Guard native suppression during TurboTad's own movement and rotation calls.
             self.injecting=true
+            pawn:AddMovementInput(world,1,false)
             local s=config.RotationInputScale or 1
             pawn:AddInputRotator({Pitch=axes[4]*(settings.PitchScale or s),
                 Yaw=axes[5]*(settings.YawScale or s),Roll=axes[6]*(settings.RollScale or s)})
