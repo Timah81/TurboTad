@@ -10,11 +10,11 @@
 
 | I want to… | Go here |
 | --- | --- |
-| **Download the mod** | The **TurboTad page on Nexus Mods** (download pending Nexus review) |
+| **Download the mod** | [TurboTad on Nexus Mods](https://www.nexusmods.com/subnautica2/mods/540) (download pending Nexus review) |
 | **Install TurboTad** | [Installation steps](#installation) below |
 | **Understand who made it** | [How TurboTad was made](HOW-IT-WAS-MADE.md) |
 | **Inspect or build the source** | [Source code map](#source-code-map) and [Build verification](#build-and-verification) |
-| **Report a problem** | The Nexus mod's Posts/Bugs sections, once the page is published |
+| **Report a problem** | [Nexus Mods Posts / Bugs](https://www.nexusmods.com/subnautica2/mods/540) (once the page is published) |
 
 **For players:** Nexus hosts the installable ZIP; this repository hosts source code, documentation, and build evidence. **For developers:** the `main` branch represents the integrated v0.4.0 source. Other feature, audit, and experiment branches are development history, not separate player downloads.
 
