@@ -4,6 +4,7 @@ local scripts=assert(source:match('^(.*[/\\])'),'Cannot locate mod script direct
 local core=dofile(scripts..'core.lua')
 local config=dofile(scripts..'config.lua')
 local controller=dofile(scripts..'controller.lua').new(core,config)
+local keyboardInputProbe=dofile(scripts..'keyboard_input_probe.lua')
 local velocity=dofile(scripts..'velocity.lua').new(scripts,config)
 local topSpeedScale=1
 local boost=dofile(scripts..'boost.lua').new(function(pawn,axes,settings)
@@ -63,6 +64,7 @@ local function onTick(context,delta)
         end
         local dt=tonumber(unwrap(delta)) or 0
         if dt<=0 then return end
+        if controller:eligible(pawn) then keyboardInputProbe.tick(pawn) end
         local axes=core.update(monitor,readFrame(),dt,config.InputTimeoutSeconds)
         local frame=monitor.frame
         local settings=frame and frame.settings or nil
