@@ -1,6 +1,7 @@
 -- TEMPORARY diagnostic probe for the game-side keyboard input path.
 -- Remove this file and its call from main.lua before any release build.
 local M = {}
+print("[TurboTad][KeyboardInputProbe] loaded; hold and release W while piloting the Tadpole.")
 local keyW
 local lastDown
 local errorReported = false
