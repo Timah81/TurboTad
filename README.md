@@ -2,21 +2,23 @@
 
 **Fly It Like You Stole It!** A six-degree-of-freedom flight-control mod for the **Subnautica 2 Tadpole** on Windows. Fly inverted, roll, pitch, yaw, strafe, boost, and customize how the Tadpole handles.
 
-> **Download status (November 22, 2026):** TurboTad v0.4.0 has been uploaded to Nexus Mods, but its Windows executable is awaiting Nexus's manual security review. The ZIP is not publicly downloadable until Nexus clears it.
+> **Release status (November 26, 2026):** TurboTad 0.4.1 is the current verified runtime package. GitHub Releases is the planned primary download location; the 0.4.1 asset is pending upload. The earlier v0.4.0 Nexus submission is still awaiting manual security review.
 >
-> **Installing TurboTad?** Do **not** use GitHub's green **Code → Download ZIP** button. That downloads source code, not the ready-to-install Windows application.
+> **Installing TurboTad?** Download the named `TurboTad_0.4.1.zip` asset from [GitHub Releases](https://github.com/Timah81/TurboTad/releases) once it is available. Do **not** use GitHub's green **Code → Download ZIP** button or the automatically generated source archives; those are not the installable Windows mod.
+>
+> **WARNING: This mod can break your gameplay session. Breaching the water surface at high speed can launch the Tadpole out of the map. Back up your saves and slow down before surfacing.**
 
 ## Start here
 
 | I want to… | Go here |
 | --- | --- |
-| **Download the mod** | [TurboTad on Nexus Mods](https://www.nexusmods.com/subnautica2/mods/540) (download pending Nexus review) |
+| **Download the mod** | [GitHub Releases](https://github.com/Timah81/TurboTad/releases) (0.4.1 asset pending upload); [Nexus Mods](https://www.nexusmods.com/subnautica2/mods/540) (earlier submission pending review) |
 | **Install TurboTad** | [Installation steps](#installation) below |
 | **Understand who made it** | [How TurboTad was made](HOW-IT-WAS-MADE.md) |
 | **Inspect or build the source** | [Source code map](#source-code-map) and [Build verification](#build-and-verification) |
-| **Report a problem** | [Nexus Mods Posts / Bugs](https://www.nexusmods.com/subnautica2/mods/540) (once the page is published) |
+| **Report a problem** | [GitHub Issues](https://github.com/Timah81/TurboTad/issues) |
 
-**For players:** Nexus hosts the installable ZIP; this repository hosts source code, documentation, and build evidence. **For developers:** the `main` branch represents the integrated v0.4.0 source. Other feature, audit, and experiment branches are development history, not separate player downloads.
+**For players:** GitHub Releases will host the installable runtime ZIP; this repository hosts source code, documentation, and build evidence. **For developers:** the integrated source on `main` is v0.4.0; the 0.4.1 source synchronization is pending. Do not assume the current source checkout reproduces the 0.4.1 binary. Other feature, audit, and experiment branches are development history, not separate player downloads.
 
 ## Features
 
@@ -38,11 +40,11 @@ Other game builds, Steam Deck/Proton, multiplayer, and combinations of competing
 
 1. **Back up your Subnautica 2 saves.** When updating, also back up any existing `ue4ss/Mods/TurboTad/` folder, including your mappings, profiles, and WAV files.
 2. Install a compatible **UE4SS** separately.
-3. Extract the **complete TurboTad ZIP from Nexus** into `Subnautica2/Binaries/Win64/`. The installed mod should end up at `Subnautica2/Binaries/Win64/ue4ss/Mods/TurboTad/`—not inside an extra nested TurboTad folder.
+3. Extract the **complete installable TurboTad release ZIP** into `Subnautica2/Binaries/Win64/`. The installed mod should end up at `Subnautica2/Binaries/Win64/ue4ss/Mods/TurboTad/`—not inside an extra nested TurboTad folder.
 4. Run `TurboTad.cmd` from `Binaries/Win64/`, or run `ue4ss/Mods/TurboTad/TurboTad.Controls.exe` directly.
 5. Configure your inputs in the Windows GUI, click **START CONTROLS**, then enter the Tadpole in-game.
 
-**Tip:** Create a desktop shortcut to `TurboTad.Controls.exe` or pin the running application to your taskbar to avoid navigating to the game folder each time.
+**Tip:** The 0.4.1 companion supports desktop shortcut creation. You can also pin the running application to your taskbar to avoid navigating to the game folder each time.
 
 The ZIP contains no user profiles or WAV files; they are created or added locally as needed. To remove TurboTad, close the game and helper, back up personal settings, delete only `ue4ss/Mods/TurboTad/` and the optional `TurboTad.cmd` launcher. Leave UE4SS and game files alone.
 
@@ -64,6 +66,16 @@ The ZIP contains no user profiles or WAV files; they are created or added locall
 | [`LICENSE`](LICENSE) | MIT license for original project code/documentation |
 
 ## Build and verification
+
+### Current runtime: 0.4.1
+
+- Game-side keyboard mapping, desktop shortcut support, and adjustable rotational and translational gains are included in the human-approved TEST 4.1 baseline. The final 0.4.1 rebuild changes public branding and version metadata only.
+- **Runtime ZIP SHA-256:** `e7a8bd675fc765101435baf09e2bd5935449507e31d70fa06c9579f740c238de`
+- **Companion EXE SHA-256:** `f13cf1ef3495f26ef0e77159f90b7b9390e69b275ca67b1a058a9b3dc15a7609`
+- The 14-file runtime archive includes the compiled Windows helper, complete TurboTad Lua mod, launcher, assets, license and enabled marker. UE4SS is a separate prerequisite.
+- Human gameplay testing passed on TEST 4.1. Automated regression and packaging verification passed for the branding-only 0.4.1 build, including isolated GUI fixtures under Mono. The final rebuilt executable has not independently been launched in native Windows gameplay as part of release verification. These checks are not antivirus certification.
+
+### Historical: 0.4.0 Nexus upload
 
 The **v0.4.0 Nexus upload** was assembled from the tested GitHub Actions build for source commit [`ee0efc405e6c…`](https://github.com/Timah81/TurboTad/commit/ee0efc405e6ce68dc0c45ecfc2b28bd66b47c5f5), including the final Lua exception-logging fix.
 
