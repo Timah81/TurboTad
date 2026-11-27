@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Drawing;
+using System.Linq;
 using System.Reflection;
 using System.Windows.Forms;
 
@@ -53,6 +55,65 @@ internal static class UiSelfTest
             count += AssertDeferredEditors(control);
         }
         return count;
+    }
+
+    private static void CheckGainPanels(Type formType, string modRoot)
+    {
+        using (Form app = (Form)Activator.CreateInstance(formType, new object[] { modRoot }))
+        using (Form fixture = new Form())
+        {
+            var rates = (NumericUpDown[])Field(formType, app, "rotationRates");
+            var gains = (NumericUpDown[])Field(formType, app, "rotationGains");
+            var movement = (NumericUpDown[])Field(formType, app, "movementRates");
+            Control angularCard = rates[0].Parent;
+            Control translationPanel = movement[0].Parent;
+            Control rotationPanel = gains[0].Parent;
+            Control gainCard = translationPanel.Parent;
+            if (angularCard.Bounds != new Rectangle(20, 53, 505, 342) ||
+                gainCard.Bounds != new Rectangle(538, 53, 505, 342) ||
+                rotationPanel.Parent != gainCard || translationPanel.Bounds != rotationPanel.Bounds)
+                throw new Exception("Gain panels do not share the original translation card area");
+            FindLabel(angularCard, "ANGULAR RESPONSE");
+            var switches = gainCard.Controls.OfType<RadioButton>().ToArray();
+            RadioButton translation = switches.Single(b => b.Text == "Translation Gain");
+            RadioButton rotation = switches.Single(b => b.Text == "Rotational Gain");
+            if (translation.Right > rotation.Left || translation.Top != rotation.Top)
+                throw new Exception("Gain selectors are not side-by-side");
+            fixture.ClientSize = new Size(1065, 420);
+            fixture.Controls.Add(angularCard);
+            fixture.Controls.Add(gainCard);
+            fixture.Show(); // The companion itself stays hidden, avoiding the desktop shortcut offer.
+            if (!translation.Checked || rotation.Checked || !translationPanel.Visible || rotationPanel.Visible ||
+                !rates[0].Visible || translation.BackColor == rotation.BackColor)
+                throw new Exception("Angular rates and the default translation gains must both be visible");
+            for (int i = 0; i < 3; i++)
+                if (movement[i].Bounds != gains[i].Bounds || !movement[i].Font.Equals(gains[i].Font) ||
+                    gains[i].Minimum != 10 || gains[i].Maximum != 1000 || gains[i].Increment != 1 ||
+                    gains[i].Value != 100)
+                    throw new Exception("Gain editor appearance or defaults differ");
+            var translationSliders = translationPanel.Controls.Cast<Control>().Where(c => c.GetType().Name == "RateSlider").ToArray();
+            var gainSliders = rotationPanel.Controls.Cast<Control>().Where(c => c.GetType().Name == "RateSlider").ToArray();
+            if (translationSliders.Length != 3 || gainSliders.Length != 3 ||
+                !translationSliders.Select(c => c.Bounds).SequenceEqual(gainSliders.Select(c => c.Bounds)))
+                throw new Exception("Gain sliders do not share the original layout");
+            rates[0].Value = 367;
+            movement[0].Value = 241;
+            rotation.Checked = true;
+            if (!rotation.Checked || translation.Checked || translationPanel.Visible || !rotationPanel.Visible ||
+                !rates[0].Visible || rotation.BackColor == translation.BackColor)
+                throw new Exception("Rotational Gain did not replace Translation Gain alongside the angular rates");
+            var sliderValue = gainSliders[1].GetType().GetProperty("Value", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            gains[1].Value = 53;
+            if ((int)sliderValue.GetValue(gainSliders[1], null) != 53)
+                throw new Exception("Precise gain editor did not update its slider");
+            sliderValue.SetValue(gainSliders[1], 56, null);
+            if (gains[1].Value != 56) throw new Exception("Gain slider did not update its editor");
+            translation.Checked = true;
+            if (!translationPanel.Visible || rotationPanel.Visible || !rates[0].Visible ||
+                rates[0].Value != 367 || movement[0].Value != 241 || gains[1].Value != 56)
+                throw new Exception("Switching panels lost values");
+        }
+        Console.WriteLine("Gain GUI passed: permanent angular rates, shared gain bounds, selection, preserved values, and 1% editor/slider sync.");
     }
 
     [STAThread]
@@ -134,8 +195,8 @@ internal static class UiSelfTest
                 NumericUpDown savedSpeed = (NumericUpDown)Field(formType, form, "topSpeed");
                 NumericUpDown mph = (NumericUpDown)Field(formType, form, "mphInput");
                 int deferredEditors = AssertDeferredEditors(form);
-                if (deferredEditors != 10)
-                    throw new Exception("Expected 10 visible delayed-commit editors, got " + deferredEditors);
+                if (deferredEditors != 13)
+                    throw new Exception("Expected 13 delayed-commit editors, got " + deferredEditors);
                 if (rotation[0].Minimum != 10 || movement[0].Minimum != 10 || mph.Minimum <= 0)
                     throw new Exception("A real numeric range was changed just to permit typing");
                 // Cosmetic cleanup: no stale explanatory subheadings, even on other tabs.
@@ -226,6 +287,7 @@ internal static class UiSelfTest
                     throw new Exception("Flight tuning checkbox not beside Save Profile");
                 form.Close();
             }
+            CheckGainPanels(formType, modRoot);
             Console.WriteLine("GUI test passed: obsolete subtitles removed, speed layout, WAV picker, numeric entry and speed synchronization.");
             return 0;
         }

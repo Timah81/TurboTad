@@ -2,6 +2,9 @@
 local source=debug.getinfo(1,'S').source:gsub('^@','')
 local scripts=assert(source:match('^(.*[/\\])'),'Cannot locate mod script directory')
 local core=dofile(scripts..'core.lua')
+local keyboard=dofile(scripts..'keyboard_input.lua')
+local keyboardState=keyboard.new(function(name) return {KeyName=FName(name)} end)
+print('[TurboTad] TurboTad 0.4.1')
 local config=dofile(scripts..'config.lua')
 local controller=dofile(scripts..'controller.lua').new(core,config)
 local velocity=dofile(scripts..'velocity.lua').new(scripts,config)
@@ -53,7 +56,7 @@ local function readFrame()
     if not f then return nil end
     local text=f:read(513)
     f:close()
-    return core.parse(text,os.time())
+    return core.parse(text,os.time(),keyboard.validName)
 end
 local function onTick(context,delta)
     if failed then return end
@@ -62,7 +65,7 @@ local function onTick(context,delta)
         controller:maintainParked(pawn)
         -- Do not release another local pawn's control when a remote Tadpole ticks.
         if not pawn:IsLocallyControlled() then
-            if controller:owns(pawn) then controller:release(not pawn:IsPiloted()) end
+            if controller:owns(pawn) then keyboardState:reset();controller:release(not pawn:IsPiloted()) end
             if hud.pawn and not controller:possessed(hud.pawn) then hud:cleanup() end
             return
         end
@@ -72,19 +75,34 @@ local function onTick(context,delta)
         local frame=monitor.frame
         local settings=frame and frame.settings or nil
         if frame and not frame.active then controller:reset() end
+        local token=frame and frame.boost or 0
+        if frame and frame.keyboard then
+            local eligible=axes and frame.active and not frame.suspended
+                and controller:eligible(pawn) and controller:inputAllowed(pawn)
+            -- Use the address to avoid relying on UE4SS wrapper identity.
+            local pc=eligible and pawn:GetController() or nil
+            local owner=eligible and pawn:GetAddress() or nil
+            local ok,mixed,edge=pcall(function()
+                return keyboardState:resolve(frame,axes,pc,owner,eligible)
+            end)
+            if not ok then
+                keyboardState:reset()
+                error('Game-side keyboard read failed; controls stopped')
+            end
+            axes,token=mixed,edge
+        else keyboardState:reset() end
         local active=controller:step(pawn,axes,settings)
         local acceptingInput=active and not frame.suspended and controller:inputAllowed(pawn)
         local now=cooldownNow(pawn)
         if acceptingInput then
             topSpeedScale=settings.TopSpeedScale or 1
-            local token=frame and frame.boost or 0
-            if not wasActive then boost:sync(frame.boost) end
-            if boost:request(pawn,frame.boost,settings.BoostCooldownSeconds,now,axes,settings) then
+            if not wasActive then boost:sync(token) end
+            if boost:request(pawn,token,settings.BoostCooldownSeconds,now,axes,settings) then
                 -- The companion hears a confirmed burst, not a mere button press.
                 writeBoostStatus(true)
                 hud:pulse() -- visual confirmation only, after the velocity burst succeeds
             end
-        elseif frame then boost:sync(frame.boost) end
+        elseif frame then keyboardState:reset();boost:sync(frame.boost) end
         if active and config.EnableBoostHud then
             hud:update(pawn,{progress=boost:progress(now),remaining=math.max(0,boost.nextAt-now),error=boost.error,right=settings.HudRight,bottom=settings.HudBottom},acceptingInput,dt)
         else hud:cleanup() end
@@ -96,7 +114,7 @@ local function onTick(context,delta)
     end)
     if not ok then
         print('[TurboTad] onTick failed; disabling mod: '..tostring(err))
-        controller:reset();failed=true
+        keyboardState:reset();controller:reset();failed=true
         hud:cleanup()
         writeBoostStatus(false)
     end
@@ -187,7 +205,7 @@ local ok,err=pcall(function()
     RegisterHook('/Script/Subnautica2.SN2PlayerController:OnPossessedPawnChangedFunction',function(context)
         if controller.target and not controller:possessed(controller.target) then
             if controller.target and not controller:possessed(controller.target) then controller:release(true) end
-            monitor=core.new_monitor();wasActive=false
+            monitor=core.new_monitor();keyboardState:reset();wasActive=false
             hud:cleanup()
             writeBoostStatus(false)
         end
@@ -221,7 +239,7 @@ if nativeHook then
                         controller:release(not controller:possessed(target))
                         hud:cleanup()
                         boost:sync(frame and frame.boost or 0)
-                        wasActive=false
+                        keyboardState:reset();wasActive=false
                         writeBoostStatus(false)
                     end
                 end
@@ -238,7 +256,7 @@ if nativeHook then
                                 RegisterHook(classPath..':OnPilotExited_BP',function(context)
                                     if controller:owns(context:get()) then
                                         if controller:owns(context:get()) then controller:release(true) end
-                                        monitor=core.new_monitor();wasActive=false
+                                        monitor=core.new_monitor();keyboardState:reset();wasActive=false
                                         hud:cleanup()
                                         writeBoostStatus(false)
                                     end
@@ -251,7 +269,7 @@ if nativeHook then
             end)
             if not success then
                 print('[TurboTad] maintenance failed; disabling mod: '..tostring(problem))
-                controller:reset();failed=true
+                keyboardState:reset();controller:reset();failed=true
                 hud:cleanup()
                 writeBoostStatus(false)
             end

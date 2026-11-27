@@ -56,6 +56,70 @@ namespace TurboTad
         bool TryButton(InputSource source, out bool down);
     }
 
+    // Translate stored Windows virtual-key codes to game-local EKey names.
+    // The profile format remains unchanged; unknown codes remain editable.
+    internal static class GameKeyboard
+    {
+        internal static string Name(int code)
+        {
+            if (code >= 65 && code <= 90) return ((char)code).ToString();
+            string[] digits = { "Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine" };
+            if (code >= 48 && code <= 57) return digits[code - 48];
+            if (code >= 96 && code <= 105) return "NumPad" + digits[code - 96];
+            if (code >= 112 && code <= 123) return "F" + (code - 111).ToString(CultureInfo.InvariantCulture);
+            switch (code)
+            {
+                case 8: return "BackSpace"; case 9: return "Tab"; case 13: return "Enter";
+                case 20: return "CapsLock"; case 27: return "Escape"; case 32: return "SpaceBar";
+                case 33: return "PageUp"; case 34: return "PageDown"; case 35: return "End";
+                case 36: return "Home"; case 37: return "Left"; case 38: return "Up";
+                case 39: return "Right"; case 40: return "Down"; case 45: return "Insert"; case 46: return "Delete";
+                case 106: return "Multiply"; case 107: return "Add"; case 109: return "Subtract";
+                case 110: return "Decimal"; case 111: return "Divide"; case 144: return "NumLock"; case 145: return "ScrollLock";
+                case 160: return "LeftShift"; case 161: return "RightShift"; case 162: return "LeftControl";
+                case 163: return "RightControl"; case 164: return "LeftAlt"; case 165: return "RightAlt";
+                case 186: return "Semicolon"; case 187: return "Equals"; case 188: return "Comma";
+                case 189: return "Hyphen"; case 190: return "Period"; case 191: return "Slash";
+                case 192: return "Tilde"; case 219: return "LeftBracket"; case 220: return "Backslash";
+                case 221: return "RightBracket"; case 222: return "Apostrophe";
+                default: return null;
+            }
+        }
+        internal static int MessageKey(int code, long flags)
+        {
+            bool extended = (flags & (1L << 24)) != 0;
+            if (code == 16) return ((flags >> 16) & 255) == 0x36 ? 161 : 160;
+            if (code == 17) return extended ? 163 : 162;
+            if (code == 18) return extended ? 165 : 164;
+            return code;
+        }
+        private static bool Slot(InputSource source, HashSet<string> used, out string name, out string error)
+        {
+            name = "-"; error = null;
+            if (source == null || source.Kind != "key") return true;
+            name = Name(source.Code);
+            if (name == null) { error = "Unsupported game keyboard key (VK " + source.Code + "). Rebind it in Setup"; return false; }
+            if (!used.Add(name)) { error = "Duplicate game keyboard binding: " + name; return false; }
+            return true;
+        }
+        internal static bool TryBindings(AxisBinding[] axes, InputSource boost, out string[] names, out string error)
+        {
+            names = new string[13]; error = null;
+            HashSet<string> used = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < 6; i++)
+            {
+                AxisBinding axis = axes[i];
+                InputSource neg = axis != null && axis.Digital ? (axis.Invert ? axis.Positive : axis.Negative) : null;
+                InputSource pos = axis != null && axis.Digital ? (axis.Invert ? axis.Negative : axis.Positive) : null;
+                if (!Slot(neg, used, out names[2*i], out error) || !Slot(pos, used, out names[2*i+1], out error)) return false;
+            }
+            return Slot(boost, used, out names[12], out error);
+        }
+        internal static bool IsKey(InputSource source) { return source != null && source.Kind == "key"; }
+        internal static bool HasKeys(AxisBinding axis)
+        { return axis != null && axis.Digital && (IsKey(axis.Negative) || IsKey(axis.Positive)); }
+    }
+
     // No device API, focus query, file I/O, rate or flight-physics logic here.
     internal static class InputMapper
     {

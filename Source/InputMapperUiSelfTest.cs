@@ -89,13 +89,40 @@ internal static class InputMapperUiSelfTest
             config.Save(mapping);
             using(Form f = (Form)Activator.CreateInstance(t,new object[]{root}))
             {
+                if (f.Text != "TurboTad 0.4.1") throw new Exception("Incorrect TurboTad release title");
                 object[] evaluated = new object[]{null};
                 if (!(bool)Call(t,f,"TryGetAxes",evaluated)) throw new Exception("Keyboard-only mapping requires a joystick");
                 Call(t,f,"StartControls");
                 if (!(bool)t.GetField("running",Flags).GetValue(f)) throw new Exception("Keyboard-only controls failed to start");
+                // Exercise actual producer without polling physical keyboard states.
+                Call(t,f,"Publish",1,new double[6]);
+                string[] activeWords = File.ReadAllText(Path.Combine(root,"input.txt")).Split((char[])null,StringSplitOptions.RemoveEmptyEntries);
+                if(activeWords.Length!=34 || activeWords[0]!="T6D8" || activeWords[3]!="1") throw new Exception("Game-side active protocol mismatch");
+                for(int i=0;i<12;i++) if(activeWords[21+i]!=((char)(65+i)).ToString()) throw new Exception("Wrong game keyboard slot");
+                if(activeWords[33]!="-") throw new Exception("Unexpected boost binding");
+                NumericUpDown[] gains = (NumericUpDown[])t.GetField("rotationGains", Flags).GetValue(f);
+                foreach (NumericUpDown gain in gains)
+                    if (gain.Value != 100M) throw new Exception("Legacy mapping must default gains to 100%");
+                gains[0].Value = 37; gains[1].Value = 211; gains[2].Value = 1000;
+                Call(t, f, "Publish", 1, new double[6]);
+                string[] gainWords = File.ReadAllText(Path.Combine(root, "input.txt")).Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+                if (gainWords.Length != 37 || gainWords[0] != "T6D9" || gainWords[34] != "0.37" ||
+                    gainWords[35] != "2.11" || gainWords[36] != "10.00")
+                    throw new Exception("Live gain frame did not contain all three values");
+                for (int i = 4; i < 34; i++)
+                    if (gainWords[i] != activeWords[i]) throw new Exception("Gain frame changed existing inputs or tuning");
+                gains[1].Value = 57;
+                Call(t, f, "Publish", 1, new double[6]);
+                gainWords = File.ReadAllText(Path.Combine(root, "input.txt")).Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+                if (gainWords[35] != "0.57") throw new Exception("Changing gain required a restart");
+                for(int i=4;i<10;i++) if(Double.Parse(activeWords[i],System.Globalization.CultureInfo.InvariantCulture)!=0) throw new Exception("Keyboard axes leaked into helper contribution");
                 Call(t,f,"StopControls"); Call(t,f,"SaveMapping");
                 config.Load(mapping);
                 if (config.SelectNodes("/TurboTad/UniversalInput/Binding[@mode='digital']").Count!=6) throw new Exception("Digital mapping roundtrip failed");
+                if (config.DocumentElement.GetAttribute("pitchGain") != "37" ||
+                    config.DocumentElement.GetAttribute("yawGain") != "57" ||
+                    config.DocumentElement.GetAttribute("rollGain") != "1000")
+                    throw new Exception("Mapping did not save independent gains");
                 XmlDocument duplicate = new XmlDocument(); duplicate.LoadXml(config.OuterXml);
                 ((XmlElement)duplicate.SelectSingleNode("/TurboTad/UniversalInput/Binding[@row='1']/Negative")).SetAttribute("code","65");
                 string previousMapping = File.ReadAllText(mapping);
@@ -117,6 +144,9 @@ internal static class InputMapperUiSelfTest
             {
                 if(t.GetField("mappingLoadError",Flags).GetValue(f)!=null)
                     throw new Exception("Readable saved conflict is latched as an unrecoverable load error");
+                NumericUpDown[] gains = (NumericUpDown[])t.GetField("rotationGains", Flags).GetValue(f);
+                if (gains[0].Value != 37 || gains[1].Value != 57 || gains[2].Value != 1000)
+                    throw new Exception("Reloaded mapping lost rotational gains");
                 Call(t,f,"StartControls");
                 if((bool)t.GetField("running",Flags).GetValue(f))throw new Exception("Conflicting saved bindings started");
                 string conflict=(string)t.GetField("mappingError",Flags).GetValue(f);
@@ -262,6 +292,8 @@ internal static class InputMapperUiSelfTest
                 NumericUpDown speed = (NumericUpDown)t.GetField("topSpeed", Flags).GetValue(f);
                 NumericUpDown[] rotation = (NumericUpDown[])t.GetField("rotationRates", Flags).GetValue(f);
                 NumericUpDown[] movement = (NumericUpDown[])t.GetField("movementRates", Flags).GetValue(f);
+                NumericUpDown[] gains = (NumericUpDown[])t.GetField("rotationGains", Flags).GetValue(f);
+                gains[0].Value = 12; gains[1].Value = 254; gains[2].Value = 739;
                 string profilePath = Path.Combine(root, "optional-flight-profile.xml");
                 speed.Value = 171;
                 rotation[0].Value = 700; rotation[1].Value = 893; rotation[2].Value = 271;
@@ -279,17 +311,19 @@ internal static class InputMapperUiSelfTest
                 if (flight == null || flight.GetAttribute("version") != "1" ||
                     flight.GetAttribute("topSpeed") != "171" ||
                     flight.GetAttribute("yawRate") != "893" ||
-                    flight.GetAttribute("strafeRate") != "415")
+                    flight.GetAttribute("strafeRate") != "415" || flight.GetAttribute("pitchGain") != "12" ||
+                    flight.GetAttribute("yawGain") != "254" || flight.GetAttribute("rollGain") != "739")
                     throw new Exception("Opt-in flight tuning did not roundtrip in XML");
                 speed.Value = 100;
                 rotation[0].Value = 100; rotation[1].Value = 100; rotation[2].Value = 100;
                 movement[0].Value = 100; movement[1].Value = 100; movement[2].Value = 100;
+                foreach (NumericUpDown gain in gains) gain.Value = 100;
                 decimal[] values = (decimal[])Call(t, f, "ReadProfileFlightTuning", flight);
                 Call(t, f, "ApplyProfileFlightTuning", (object)values);
                 if (speed.Value != 171 || rotation[0].Value != 700 ||
                     rotation[1].Value != 893 || rotation[2].Value != 271 ||
                     movement[0].Value != 300 || movement[1].Value != 415 ||
-                    movement[2].Value != 146)
+                    movement[2].Value != 146 || gains[0].Value != 12 || gains[1].Value != 254 || gains[2].Value != 739)
                     throw new Exception("Opt-in flight tuning did not restore GUI values");
                 XmlDocument invalidProfile = new XmlDocument();
                 invalidProfile.LoadXml(saved.OuterXml);
@@ -304,8 +338,24 @@ internal static class InputMapperUiSelfTest
                 if (!invalidFlightRejected || speed.Value != 171)
                     throw new Exception("Out-of-range flight tuning was accepted or changed the GUI");
                 decimal[] absent = (decimal[])Call(t, f, "ReadProfileFlightTuning", new object[]{null});
-                if (absent != null || speed.Value != 171)
+                Call(t, f, "ApplyProfileFlightTuning", (object)absent);
+                if (absent != null || speed.Value != 171 || gains[1].Value != 254)
                     throw new Exception("Legacy profile must retain current flight settings");
+                XmlElement oldTuning = (XmlElement)flight.CloneNode(true);
+                foreach (string key in new string[] { "pitchGain", "yawGain", "rollGain" })
+                    oldTuning.RemoveAttribute(key);
+                Call(t, f, "ApplyProfileFlightTuning", Call(t, f, "ReadProfileFlightTuning", oldTuning));
+                foreach (NumericUpDown gain in gains)
+                    if (gain.Value != 100) throw new Exception("Legacy tuned profile must restore linear response");
+                oldTuning.SetAttribute("rollGain", "1001");
+                bool rejectedGain = false;
+                try { Call(t, f, "ReadProfileFlightTuning", oldTuning); }
+                catch (TargetInvocationException e)
+                {
+                    if (e.InnerException is FormatException) rejectedGain = true;
+                    else throw;
+                }
+                if (!rejectedGain) throw new Exception("Out-of-range profile gain was accepted");
                 t.GetField("activeInputProfilePath", Flags).SetValue(f, profilePath);
                 speed.Value = 200;
                 Call(t, f, "ExportInputProfile");

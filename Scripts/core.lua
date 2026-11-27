@@ -3,17 +3,21 @@ local function finite(n)
     return type(n) == 'number' and n == n and n ~= math.huge and n ~= -math.huge
 end
 
-function M.parse(line, now)
+function M.parse(line, now, validKeyName)
     if type(line) ~= 'string' or #line > 512 then return nil end
     local words = {}
     for word in line:gmatch('%S+') do words[#words+1] = word end
-    local speed=words[1]=='T6D7'
+    local gains=words[1]=='T6D9'
+    local keyboard=words[1]=='T6D8' or (gains and #words==37)
+    local speed=words[1]=='T6D7' or keyboard or gains
     local screen=words[1]=='T6D6' or speed
     local translation=words[1]=='T6D5' or screen
     local throttle=words[1]=='T6D4' or translation
     local modern=words[1]=='T6D3' or throttle
     local extended=words[1]=='T6D2' or modern
-    if not ((words[1]=='T6D1' and #words==10) or (extended and #words==(speed and 21 or (screen and 20 or (translation and 18 or (throttle and 16 or 15)))))) then return nil end
+    local expected=keyboard and 34 or (speed and 21 or (screen and 20 or (translation and 18 or (throttle and 16 or 15))))
+    if gains then expected=expected+3 end
+    if not ((words[1]=='T6D1' and #words==10) or (extended and #words==expected)) then return nil end
     local seq, stamp, active = tonumber(words[2]), tonumber(words[3]), tonumber(words[4])
     if not finite(seq) or seq < 0 or seq % 1 ~= 0 then return nil end
     if not finite(stamp) or stamp < 0 or stamp % 1 ~= 0 then return nil end
@@ -54,9 +58,37 @@ function M.parse(line, now)
         if not finite(scale) or scale<0.25 or scale>4 then return nil end
         settings.TopSpeedScale=scale
     end
+    local keys=nil
+    if keyboard then
+        if type(validKeyName)~='function' then return nil end
+        keys={}
+        local used={}
+        for i=1,13 do
+            local key=words[21+i]
+            if not validKeyName(key) or (key~='-' and used[key]) then return nil end
+            keys[i]=key
+            if key~='-' then used[key]=true end
+        end
+        -- A mixed pair has exactly one non-keyboard direction. A fully
+        -- keyboard pair must have zero companion contribution.
+        for i=1,6 do
+            local neg,pos=keys[2*i-1]~='-',keys[2*i]~='-'
+            if (neg and pos and axes[i]~=0) or (neg and axes[i]<0)
+                or (pos and axes[i]>0) then return nil end
+            if (neg or pos) and axes[i]%1~=0 then return nil end
+        end
+        if keys[13]~='-' and boost~=0 then return nil end
+    end
+    if gains then
+        local pitch,yaw,roll=tonumber(words[#words-2]),tonumber(words[#words-1]),tonumber(words[#words])
+        for _,value in ipairs({pitch or false,yaw or false,roll or false}) do
+            if not finite(value) or value<0.1 or value>10 then return nil end
+        end
+        settings.PitchGain=pitch;settings.YawGain=yaw;settings.RollGain=roll
+    end
     local suspended=modern and active==2
     if suspended then axes={0,0,0,0,0,0};boost=0 end
-    return {seq=seq, stamp=stamp, active=active~=0, suspended=suspended, axes=axes,settings=settings,boost=boost}
+    return {seq=seq, stamp=stamp, active=active~=0, suspended=suspended, axes=axes,settings=settings,boost=boost,keyboard=keys}
 end
 
 function M.new_monitor()

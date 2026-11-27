@@ -32,6 +32,14 @@ local function calibratedAcceleration(originalAcceleration,originalSpeed,setting
     return math.max(originalAcceleration,math.min(50000,rounded))
 end
 
+-- Adjust the slope near center while preserving zero, full deflection and sign.
+-- The neutral path is exact, and digital inputs keep their original endpoints.
+local function rotationalResponse(axis,gain)
+    if not gain or gain==1 or axis==0 or math.abs(axis)==1 then return axis end
+    local magnitude=math.abs(axis)
+    return axis*gain/((1-magnitude)+gain*magnitude)
+end
+
 function M.new(core,config)
     local self={target=nil,ownerPC=nil,changes={},parked={},injecting=false,restoreErrors={}}
 
@@ -230,8 +238,8 @@ function M.new(core,config)
             self.injecting=true
             pawn:AddMovementInput(world,1,false)
             local s=config.RotationInputScale or 1
-            pawn:AddInputRotator({Pitch=axes[4]*(settings.PitchScale or s),
-                Yaw=axes[5]*(settings.YawScale or s),Roll=axes[6]*(settings.RollScale or s)})
+            pawn:AddInputRotator({Pitch=rotationalResponse(axes[4],settings.PitchGain)*(settings.PitchScale or s),
+                Yaw=rotationalResponse(axes[5],settings.YawGain)*(settings.YawScale or s),Roll=rotationalResponse(axes[6],settings.RollGain)*(settings.RollScale or s)})
             self.injecting=false
             return true
         end)

@@ -12,6 +12,11 @@ using System.Xml;
 using System.Reflection;
 using System.Media;
 
+[assembly: AssemblyTitle("TurboTad")]
+[assembly: AssemblyProduct("TurboTad")]
+[assembly: AssemblyVersion("0.4.1.0")]
+[assembly: AssemblyFileVersion("0.4.1.0")]
+[assembly: AssemblyInformationalVersion("0.4.1")]
 [assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
 
 namespace TurboTad
@@ -42,7 +47,6 @@ namespace TurboTad
         internal static extern uint joyGetPosEx(uint id, ref Info info);
         [DllImport("winmm.dll", ExactSpelling = true)]
         internal static extern uint joyGetNumDevs();
-        [DllImport("user32.dll")] internal static extern short GetAsyncKeyState(int key);
         [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] internal static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
 
@@ -174,7 +178,7 @@ namespace TurboTad
                     return InputSource.TryXboxPlayer(Xbox.Device, out player) &&
                         XInputProbe.TryRead((uint)player, out state, out issue) && XInputProbe.ButtonDown(state, Xbox.Code);
                 }
-                return Key != 0 ? (Native.GetAsyncKeyState(Key) & 0x8000) != 0 :
+                return Key != 0 ? false :
                     Device != null && Device.Connected && (Device.Buttons & (1U << Button)) != 0;
             }
         }
@@ -182,6 +186,7 @@ namespace TurboTad
 
     public sealed partial class ControlsWindow : Form
     {
+        private const string BuildTitle = "TurboTad 0.4.1";
         private readonly string root;
         private readonly List<Device> devices = new List<Device>();
         private readonly XInputProbe.State[] xboxStates = new XInputProbe.State[4];
@@ -205,6 +210,9 @@ namespace TurboTad
         private readonly Button start = new Button();
         private readonly NumericUpDown deadzone = new DeferredNumericUpDown();
         private readonly NumericUpDown[] rotationRates = new NumericUpDown[3];
+        private readonly NumericUpDown[] rotationGains = new NumericUpDown[3];
+        private static readonly string[] RotationGainKeys = { "pitchGain", "yawGain", "rollGain" };
+        private const int DefaultRotationGain = 100;
         private readonly NumericUpDown[] movementRates = new NumericUpDown[3];
         private readonly PictureBox brandMark = new PictureBox();
         private System.Drawing.Icon applicationIcon;
@@ -217,11 +225,9 @@ namespace TurboTad
         private DateTime lastBoostStatusUtc = DateTime.MinValue;
         private SoundPlayer boostSound;
         private string boostSoundIssue;
-        // Monotonic local cooldown for both accepting a boost-button edge and playing its WAV.
-        // The game retains its own safety/cooldown check; audio never invokes game FMOD APIs.
-        private readonly Stopwatch localBoostCooldown = new Stopwatch();
-        private double cooldownAtLastPressSeconds = 10.0;
-        private long pendingAudioToken;
+        // The game is authoritative for boost success and cooldown on every device.
+        // Only a successful token from this active helper session can play the WAV.
+        private long firstActiveSequence, lastAudioToken;
         private bool lastBoostDown;
         private long boostToken;
         private readonly string[] labels = { "Forward / reverse", "Strafe right / left", "Thrust up / down", "Pitch up / down", "Yaw right / left", "Roll right / left" };
@@ -240,14 +246,13 @@ namespace TurboTad
         private DateTime pendingLearnSinceUtc;
         private const int LearnSettleMilliseconds = 125;
         private bool running;
-        private long sequence = DateTime.UtcNow.Ticks;
+        private long sequence = DateTime.UtcNow.Ticks / 1000L; // exact even in a double-number Lua runtime
         private string lastIoError;
         private int ioFailures;
 
         public ControlsWindow(string modRoot)
         {
             root = modRoot;
-            Text = "TurboTad 0.4.0-rc.1";
             string soundPath = Path.Combine(root, "Assets", "TurboTadBoost.wav");
             if (File.Exists(soundPath))
             {
@@ -271,6 +276,7 @@ namespace TurboTad
             timer.Interval = 16;
             timer.Tick += delegate { TickControls(); };
             timer.Start();
+            Shown += delegate { OfferDesktopShortcut(); };
             FormClosing += delegate {
                 timer.Stop();
                 running = false;
@@ -302,7 +308,7 @@ namespace TurboTad
 
         private void BuildBetaflightInterface()
         {
-            Text = "TurboTad | v0.4.0-rc.1";
+            Text = BuildTitle;
             ClientSize = new Size(1120, 800);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -381,26 +387,9 @@ namespace TurboTad
 
             UiLabel(tune, "LIVE TUNING", 20, 12, 225, 26, 12F, Orange, true);
 
-            Panel rotations = Section(tune, 20, 53, 505, 342, "ANGULAR RESPONSE", "Engine-relative rotation gain (100% = original).");
-            Panel movements = Section(tune, 538, 53, 505, 342, "TRANSLATION GAIN", "Proportional movement sensitivity (100% = original).");
-            string[] rateNames = { "Pitch", "Yaw", "Roll" };
-            string[] movementNames = { "Forward / reverse", "Strafe left / right", "Vertical up / down" };
-            for (int i = 0; i < 3; ++i)
-            {
-                rotationRates[i] = MakeNumber(rotations, 392, 82 + i * 82, 90, 28, 10M, 1000M, 100M, 1M);
-                RateSlider slider = new RateSlider(10, 1000, 1, 100);
-                slider.SetBounds(19, 112 + i * 82, 461, 30);
-                rotations.Controls.Add(slider);
-                UiLabel(rotations, rateNames[i] + " rate (%)", 20, 82 + i * 82, 365, 27, 10F, Color.WhiteSmoke);
-                BindSlider(slider, rotationRates[i]);
-
-                movementRates[i] = MakeNumber(movements, 392, 82 + i * 82, 90, 28, 10M, 1000M, 100M, 1M);
-                RateSlider movement = new RateSlider(10, 1000, 1, 100);
-                movement.SetBounds(19, 112 + i * 82, 461, 30);
-                movements.Controls.Add(movement);
-                UiLabel(movements, movementNames[i] + " gain (%)", 20, 82 + i * 82, 366, 27, 10F, Color.WhiteSmoke);
-                BindSlider(movement, movementRates[i]);
-            }
+            Panel angular = Section(tune, 20, 53, 505, 342, "ANGULAR RESPONSE", "Full-stick rotation input (100% = original).");
+            AddTuningRows(angular, rotationRates, new[] { "Pitch", "Yaw", "Roll" }, "rate", 82);
+            BuildGainPanels(tune);
 
             // Keep the top-speed card within the flight tab at Windows text/DPI scales.
             // Only presentation coordinates changed; slider/editor binding and units remain intact.
@@ -566,13 +555,7 @@ namespace TurboTad
             status.ForeColor = Muted;
             footer.Controls.Add(status);
             Button about = ThemeButton(footer, "ABOUT", 824, 17, 95, 48, false);
-            about.Click += delegate { MessageBox.Show(this,
-                "TurboTad 0.4.0-rc.1  •  Flight Configurator\r\n\r\nSix-axis analog Tadpole controls with linked flight and boost speed.\r\n\r\n" +
-                "The rotation settings are engine-input multipliers, not calibrated degrees/second. " +
-                "Estimated mph assumes a native 1000 cm/s swim cap observed on the tested build.\r\n\r\n" +
-                "Runs locally. No network telemetry, administrator rights or controller-driver changes.\r\n\r\n" +
-                "WARNING: This mod can break your game. Breaching the water surface at high speed can launch the Tadpole out of the map. Back up your saves and slow down before surfacing.",
-                "About TurboTad", MessageBoxButtons.OK, MessageBoxIcon.Information); };
+            about.Click += delegate { ShowAbout(); };
             start.Text = "START CONTROLS";
             start.SetBounds(932, 16, 168, 49);
             StyleButton(start, true);
@@ -587,6 +570,71 @@ namespace TurboTad
             page.BackColor = Canvas;
             page.ForeColor = Color.WhiteSmoke;
             return page;
+        }
+
+        private void BuildGainPanels(Control parent)
+        {
+            Panel card = new Panel { BackColor = Surface };
+            card.SetBounds(538, 53, 505, 342);
+            parent.Controls.Add(card);
+
+            RadioButton translation = GainButton(card, "Translation Gain", 18);
+            RadioButton rotation = GainButton(card, "Rotational Gain", 220);
+            Panel translationPanel = GainPanel(card, movementRates,
+                new[] { "Forward / reverse", "Strafe left / right", "Vertical up / down" },
+                "Proportional movement sensitivity (100% = original).");
+            Panel rotationPanel = GainPanel(card, rotationGains, new[] { "Pitch", "Yaw", "Roll" },
+                "Partial-stick sensitivity (100% = linear).");
+            translation.CheckedChanged += delegate
+            {
+                bool showTranslation = translation.Checked;
+                translationPanel.Visible = showTranslation;
+                rotationPanel.Visible = !showTranslation;
+                translation.BackColor = showTranslation ? Orange : SurfaceLight;
+                translation.ForeColor = showTranslation ? Canvas : Color.WhiteSmoke;
+                rotation.BackColor = showTranslation ? SurfaceLight : Orange;
+                rotation.ForeColor = showTranslation ? Color.WhiteSmoke : Canvas;
+            };
+            translation.Checked = true;
+        }
+
+        private RadioButton GainButton(Control parent, string label, int x)
+        {
+            RadioButton button = new RadioButton
+            {
+                Appearance = Appearance.Button, FlatStyle = FlatStyle.Flat,
+                Text = label, TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI", 9F, FontStyle.Bold), UseVisualStyleBackColor = false
+            };
+            button.FlatAppearance.BorderColor = Orange;
+            button.FlatAppearance.CheckedBackColor = Orange;
+            button.SetBounds(x, 12, 196, 29);
+            parent.Controls.Add(button);
+            return button;
+        }
+
+        private Panel GainPanel(Control card, NumericUpDown[] values, string[] names, string description)
+        {
+            Panel panel = new Panel();
+            panel.SetBounds(0, 43, 505, 299);
+            card.Controls.Add(panel);
+            UiLabel(panel, description, 18, 0, 470, 38, 8.6F, Muted);
+            AddTuningRows(panel, values, names, "gain", 39);
+            return panel;
+        }
+
+        private void AddTuningRows(Control panel, NumericUpDown[] values, string[] names, string unit, int top)
+        {
+            for (int i = 0; i < values.Length; ++i)
+            {
+                int y = top + i * 82;
+                values[i] = MakeNumber(panel, 392, y, 90, 28, 10M, 1000M, 100M, 1M);
+                RateSlider slider = new RateSlider(10, 1000, 1, 100);
+                slider.SetBounds(19, y + 30, 461, 30);
+                panel.Controls.Add(slider);
+                UiLabel(panel, names[i] + " " + unit + " (%)", 20, y, 365, 27, 10F, Color.WhiteSmoke);
+                BindSlider(slider, values[i]);
+            }
         }
 
         private Panel Section(Control parent, int x, int y, int width, int height, string heading, string description, int descriptionWidth = -1)
@@ -869,7 +917,8 @@ namespace TurboTad
             running = false;
             digitalFocus.Reset();
             boostToken = 0;
-            pendingAudioToken = 0;
+            firstActiveSequence = 0;
+            lastBoostDown = false;
             start.Text = "START CONTROLS";
             Publish(0, new double[6]);
         }
@@ -879,11 +928,15 @@ namespace TurboTad
             values = new double[6];
             AxisBinding[] bindings = CurrentBindings();
             if (mappingLoadError != null) { mappingError = mappingLoadError; return false; }
+            ButtonChoice boost = boostChoice.SelectedItem as ButtonChoice;
+            InputSource boostSource = boost == null ? null : boost.Source;
+            if (!InputMapper.ValidateSources(bindings, boostSource, out mappingError)) return false;
+            string[] gameKeys;
+            if (!GameKeyboard.TryBindings(bindings, boostSource, out gameKeys, out mappingError)) return false;
             for (int i = 0; i < 6; i++)
                 if (!InputMapper.TryEvaluate(bindings[i], new HelperInputFrame(this), (double)deadzone.Value,
                     out values[i], out mappingError)) return false;
-            ButtonChoice boost = boostChoice.SelectedItem as ButtonChoice;
-            return InputMapper.ValidateSources(bindings, boost == null ? null : boost.Source, out mappingError);
+            return true;
         }
 
         private void StartControls()
@@ -984,7 +1037,11 @@ namespace TurboTad
             {
                 double value; string error;
                 bool valid = InputMapper.TryEvaluate(preview[i], previewFrame, (double)deadzone.Value, out value, out error);
-                meters[i].Text = valid ? value.ToString("+0.00;-0.00;0.00", CultureInfo.InvariantCulture) : "--";
+                // Keyboard-only values are intentionally not sampled by the desktop UI.
+                // For a mixed row retain the numeric preview of its controller half.
+                AxisBinding row = preview[i];
+                bool keyOnly = GameKeyboard.HasKeys(row) && GameKeyboard.IsKey(row.Negative) && GameKeyboard.IsKey(row.Positive);
+                meters[i].Text = valid ? (keyOnly ? "GAME" : value.ToString("+0.00;-0.00;0.00", CultureInfo.InvariantCulture)) : "--";
             }
             if (running && !mapped)
             {
@@ -994,34 +1051,15 @@ namespace TurboTad
             bool active = running && mapped && foreground;
             int mode = running && mapped ? (foreground ? 1 : 2) : 0;
             ButtonChoice boostButton = boostChoice.SelectedItem as ButtonChoice;
-            bool boostDown = boostButton != null && boostButton.Source != null &&
+            bool keyboardBoost = boostButton != null && GameKeyboard.IsKey(boostButton.Source);
+            bool boostDown = boostButton != null && boostButton.Source != null && !keyboardBoost &&
                 digitalFocus.Filter(boostButton.Source.Identity, boostButton.Down, active);
-            // Exactly one activation per press, gated by the same user-configured cooldown
-            // sent to the game in Publish(). Holding the button or pressing during cooldown
-            // cannot send another token or replay the sound.
-            bool timerReady = !localBoostCooldown.IsRunning ||
-                localBoostCooldown.Elapsed.TotalSeconds >= cooldownAtLastPressSeconds;
-            if (active && boostDown && !lastBoostDown && timerReady)
-            {
-                boostToken = sequence + 1;
-                pendingAudioToken = boostToken;
-            }
-            if (!active) { boostToken = 0; pendingAudioToken = 0; }
+            // A non-keyboard press publishes one token. Keyboard edges are made in Lua.
+            // The game rejects cooldown presses; neither path plays speculative audio.
+            if (active && boostDown && !lastBoostDown) boostToken = sequence + 1;
+            if (!active || keyboardBoost) boostToken = 0;
             lastBoostDown = boostDown;
             Publish(mode, active ? values : new double[6]);
-            // Start the local cooldown and play only after the matching input frame was
-            // successfully written. A failed file write must not produce a fake sound.
-            if (active && pendingAudioToken != 0 && lastIoError == null)
-            {
-                pendingAudioToken = 0;
-                cooldownAtLastPressSeconds = (double)boostCooldown.Value;
-                localBoostCooldown.Restart();
-                if (boostSound != null)
-                {
-                    try { boostSound.Play(); }
-                    catch (Exception e) { boostSoundIssue = e.Message; }
-                }
-            }
             UpdateBoostStatus();
             status.Text = lastIoError != null ? "INPUT FILE ERROR: " + lastIoError :
                 active ? "SENDING FLIGHT INPUT - Alt-Tab pauses input; Stop restores stock auto-leveling." :
@@ -1036,7 +1074,19 @@ namespace TurboTad
             try
             {
                 long stamp = (DateTime.UtcNow.Ticks - 621355968000000000L) / 10000000L;
-                StringBuilder line = new StringBuilder("T6D7 ");
+                string[] gameKeys = null;
+                if (mode != 0)
+                {
+                    ButtonChoice assigned = boostChoice.SelectedItem as ButtonChoice;
+                    string error;
+                    if (!GameKeyboard.TryBindings(CurrentBindings(), assigned == null ? null : assigned.Source, out gameKeys, out error))
+                        throw new InvalidOperationException(error);
+                    if (Array.TrueForAll(gameKeys, delegate(string name) { return name == "-"; })) gameKeys = null;
+                }
+                // Retain the legacy wire format when the response is linear or controls are stopped.
+                bool sendGains = mode != 0 && Array.Exists(rotationGains,
+                    delegate(NumericUpDown gain) { return gain.Value != DefaultRotationGain; });
+                StringBuilder line = new StringBuilder(sendGains ? "T6D9 " : (gameKeys == null ? "T6D7 " : "T6D8 "));
                 line.Append((++sequence).ToString(CultureInfo.InvariantCulture)).Append(' ');
                 line.Append(stamp.ToString(CultureInfo.InvariantCulture)).Append(' ').Append(mode.ToString(CultureInfo.InvariantCulture));
                 for (int i = 0; i < 6; i++) line.Append(' ').Append(values[i].ToString("0.000000", CultureInfo.InvariantCulture));
@@ -1049,15 +1099,22 @@ namespace TurboTad
                 line.Append(' ').Append(hudRight.ToString(CultureInfo.InvariantCulture));
                 line.Append(' ').Append(hudBottom.ToString(CultureInfo.InvariantCulture));
                 line.Append(' ').Append((topSpeed.Value / 100M).ToString("0.00", CultureInfo.InvariantCulture));
+                if (gameKeys != null) foreach (string name in gameKeys) line.Append(' ').Append(name);
+                if (sendGains)
+                    foreach (NumericUpDown gain in rotationGains)
+                        line.Append(' ').Append((gain.Value / 100M).ToString("0.00", CultureInfo.InvariantCulture));
                 line.Append('\n');
                 File.WriteAllText(temp, line.ToString(), new UTF8Encoding(false));
                 if (File.Exists(target)) File.Replace(temp, target, null);
                 else File.Move(temp, target);
+                if (mode == 1) { if (firstActiveSequence == 0) firstActiveSequence = sequence; }
+                else firstActiveSequence = 0;
                 lastIoError = null;
                 ioFailures = 0;
             }
             catch (Exception e)
             {
+                firstActiveSequence = 0;
                 lastIoError = e.Message;
                 ioFailures++;
                 if (ioFailures >= 15) { running = false; start.Text = "START CONTROLS"; }
@@ -1088,6 +1145,17 @@ namespace TurboTad
                     (audioStatus && (!long.TryParse(words[4], out confirmedToken) || confirmedToken < 0))) return;
                 lastBoostStatusUtc = clock;
                 if (code == 4) StopControls();
+                if (audioStatus && running && Native.IsGameForeground() && lastIoError == null &&
+                    firstActiveSequence != 0 && confirmedToken >= firstActiveSequence &&
+                    confirmedToken <= sequence && confirmedToken > lastAudioToken)
+                {
+                    lastAudioToken = confirmedToken;
+                    if (boostSound != null)
+                    {
+                        try { boostSound.Play(); }
+                        catch (Exception e) { boostSoundIssue = e.Message; }
+                    }
+                }
                 boostStatus.Text = code == 4 ? "Mod stopped - restart the game" :
                     code == 2 ? "Boost unavailable" :
                     remaining > 0 ? "Boost recharging: " + remaining + " s" :
@@ -1144,6 +1212,8 @@ namespace TurboTad
                 for (int i = 0; i < 3; i++) top.SetAttribute(movementKeys[i], movementRates[i].Value.ToString(CultureInfo.InvariantCulture));
                 string[] rateKeys = { "pitchRate", "yawRate", "rollRate" };
                 for (int i = 0; i < 3; i++) top.SetAttribute(rateKeys[i], rotationRates[i].Value.ToString(CultureInfo.InvariantCulture));
+                for (int i = 0; i < rotationGains.Length; i++)
+                    top.SetAttribute(RotationGainKeys[i], rotationGains[i].Value.ToString(CultureInfo.InvariantCulture));
                 top.SetAttribute("boostCooldown", boostCooldown.Value.ToString(CultureInfo.InvariantCulture));
                 top.SetAttribute("topSpeed", topSpeed.Value.ToString(CultureInfo.InvariantCulture));
                 top.SetAttribute("hudRight", hudRight.ToString(CultureInfo.InvariantCulture));
@@ -1217,6 +1287,10 @@ namespace TurboTad
                 for (int i = 0; i < 3; i++)
                     if (decimal.TryParse(top.GetAttribute(rateKeys[i]), NumberStyles.Number, CultureInfo.InvariantCulture, out dz))
                         rotationRates[i].Value = Math.Max(rotationRates[i].Minimum, Math.Min(rotationRates[i].Maximum, dz));
+                for (int i = 0; i < rotationGains.Length; i++)
+                    if (decimal.TryParse(top.GetAttribute(RotationGainKeys[i]), NumberStyles.Number, CultureInfo.InvariantCulture, out dz)
+                        && decimal.Truncate(dz) == dz)
+                        rotationGains[i].Value = Math.Max(rotationGains[i].Minimum, Math.Min(rotationGains[i].Maximum, dz));
                 if (decimal.TryParse(top.GetAttribute("boostCooldown"), NumberStyles.Number, CultureInfo.InvariantCulture, out dz))
                     boostCooldown.Value = Math.Max(boostCooldown.Minimum, Math.Min(boostCooldown.Maximum, dz));
                 LoadLegacyBindings(top);

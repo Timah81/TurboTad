@@ -111,7 +111,9 @@ namespace TurboTad
             public bool TryButton(InputSource source,out bool down)
             {
                 down=false;
-                if(source.Kind=="key") down=(Native.GetAsyncKeyState(source.Code)&0x8000)!=0;
+                // Game-side keyboard values are deliberately neutral in the helper.
+                // This leaves only the non-keyboard contribution of a digital pair.
+                if(source.Kind=="key") return GameKeyboard.Name(source.Code)!=null;
                 else if(source.Kind=="xbutton")
                 {
                     XInputProbe.State state;
@@ -216,6 +218,7 @@ namespace TurboTad
             {
                 tuning.SetAttribute(rotationKeys[i], rotationRates[i].Value.ToString(CultureInfo.InvariantCulture));
                 tuning.SetAttribute(movementKeys[i], movementRates[i].Value.ToString(CultureInfo.InvariantCulture));
+                tuning.SetAttribute(RotationGainKeys[i], rotationGains[i].Value.ToString(CultureInfo.InvariantCulture));
             }
             return tuning;
         }
@@ -231,13 +234,13 @@ namespace TurboTad
         }
 
         // Parse/validate every value before changing any current GUI settings.
-        // Order: top speed; pitch, yaw, roll; forward, strafe, vertical.
+        // Order: top speed; three angular rates; three translation gains; three rotational gains.
         private decimal[] ReadProfileFlightTuning(XmlElement tuning)
         {
             if (tuning == null) return null;
             if (tuning.GetAttribute("version") != "1")
                 throw new FormatException("Unsupported flight tuning profile version");
-            decimal[] values = new decimal[7];
+            decimal[] values = new decimal[10];
             values[0] = ReadTuningValue(tuning, "topSpeed", topSpeed.Minimum, topSpeed.Maximum);
             string[] rotationKeys = { "pitchRate", "yawRate", "rollRate" };
             string[] movementKeys = { "forwardRate", "strafeRate", "verticalRate" };
@@ -247,6 +250,9 @@ namespace TurboTad
                     rotationRates[i].Minimum, rotationRates[i].Maximum);
                 values[i + 4] = ReadTuningValue(tuning, movementKeys[i],
                     movementRates[i].Minimum, movementRates[i].Maximum);
+                values[i + 7] = tuning.HasAttribute(RotationGainKeys[i])
+                    ? ReadTuningValue(tuning, RotationGainKeys[i], rotationGains[i].Minimum, rotationGains[i].Maximum)
+                    : DefaultRotationGain;
             }
             return values;
         }
@@ -259,6 +265,7 @@ namespace TurboTad
             {
                 rotationRates[i].Value = values[i + 1];
                 movementRates[i].Value = values[i + 4];
+                rotationGains[i].Value = values[i + 7];
             }
         }
 

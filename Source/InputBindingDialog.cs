@@ -22,7 +22,7 @@ namespace TurboTad
         }
     }
 
-    internal sealed class InputCaptureDialog : Form
+    internal sealed class InputCaptureDialog : Form, IMessageFilter
     {
         private readonly IList<Device> devices;
         private readonly Dictionary<string,bool> previous = new Dictionary<string,bool>();
@@ -41,8 +41,29 @@ namespace TurboTad
             Button cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel };
             cancel.SetBounds(400,105,115,30);Controls.Add(cancel);CancelButton=cancel;
             Snapshot(false); timer.Interval = 16; timer.Tick += delegate { if (ContainsFocus) Snapshot(true); else Snapshot(false); };
-            Shown += delegate { Snapshot(false); timer.Start(); };
-            FormClosed += delegate { timer.Stop(); timer.Dispose(); };
+            Shown += delegate { Snapshot(false); Application.AddMessageFilter(this); timer.Start(); };
+            Deactivate += delegate { pending = null; captureWait.Reset(); };
+            FormClosed += delegate { Application.RemoveMessageFilter(this); timer.Stop(); timer.Dispose(); };
+        }
+        // This is a WinForms UI-thread message filter, not a global keyboard hook.
+        // It is registered only while the explicit Learn dialog is open.
+        public bool PreFilterMessage(ref Message message)
+        {
+            if (!ContainsFocus || (message.Msg != 0x100 && message.Msg != 0x104)) return false;
+            Control target = Control.FromChildHandle(message.HWnd);
+            if (target == null || (target != this && target.FindForm() != this)) return false;
+            long flags = message.LParam.ToInt64();
+            int code = GameKeyboard.MessageKey((int)message.WParam.ToInt64(), flags);
+            if (code == 27) return false; // Escape still cancels.
+            if (GameKeyboard.Name(code) == null) return false;
+            if ((flags & (1L << 30)) != 0) return true; // ignore auto-repeat / held keys
+            InputSource candidate = InputSource.Key(code);
+            if (InputMapper.PreferButtonLearnCandidate(candidate, pending))
+            {
+                pending = candidate;
+                captureWait.Restart();
+            }
+            return true;
         }
         private void Observe(InputSource source, bool down, bool capture)
         {
@@ -60,11 +81,6 @@ namespace TurboTad
         private void Snapshot(bool capture)
         {
             if (!capture) { pending = null; captureWait.Reset(); }
-            for (int key = 8; key <= 254; key++)
-            {
-                if (key == 27 || key == 16 || key == 17 || key == 18) continue;
-                Observe(InputSource.Key(key), (Native.GetAsyncKeyState(key) & 0x8000) != 0, capture);
-            }
             foreach (Device d in devices)
             {
                 d.Poll(); if (!d.Connected) continue;
